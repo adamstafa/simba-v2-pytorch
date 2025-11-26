@@ -4,6 +4,7 @@
 import os
 import random
 import time
+import math
 from dataclasses import dataclass
 
 import gymnasium as gym
@@ -168,6 +169,17 @@ class Actor(nn.Module):
         return dist.sample() * self.action_scale + self.action_bias, log_prob, None # TODO: maybe return mean as third value?
 
 
+def grad_norm(optimizer):
+    total = 0.0
+    for group in optimizer.param_groups:
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            param_norm = p.grad.data.norm(2)
+            total += param_norm.item() ** 2
+    return math.sqrt(total)
+
+
 if __name__ == "__main__":
 
     args = tyro.cli(Args)
@@ -320,6 +332,8 @@ if __name__ == "__main__":
                 writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
                 writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
                 writer.add_scalar("losses/alpha", alpha, global_step)
+                writer.add_scalar("gradients/actor_norm", grad_norm(actor_optimizer), global_step)
+                writer.add_scalar("gradients/qf_norm", grad_norm(q_optimizer), global_step)
                 print("SPS:", int(global_step / (time.time() - start_time)))
                 writer.add_scalar(
                     "charts/SPS",
