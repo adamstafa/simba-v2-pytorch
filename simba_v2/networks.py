@@ -21,7 +21,7 @@ class SimbaV2Actor(nn.Module):
                     alpha_init: float,
                     alpha_scale: float,
                     c_shift: float):
-        
+        super().__init__()
         self.num_blocks = num_blocks
         self.hidden_dim = hidden_dim
         self.obs_dim = obs_dim
@@ -40,18 +40,20 @@ class SimbaV2Actor(nn.Module):
             c_shift=self.c_shift
         )
         self.encoder = nn.Sequential(
-            [
+            *[
                 HyperLERPBlock(
-                    hidden_dim=self.hidden_dim,
-                    scaler_init=self.scaler_init,
-                    scaler_scale=self.scaler_scale,
-                    alpha_init=self.alpha_init,
-                    alpha_scale=self.alpha_scale,
-                )
+                        input_dim=self.hidden_dim,
+                        hidden_dim=self.hidden_dim,
+                        scaler_init=self.scaler_init,
+                        scaler_scale=self.scaler_scale,
+                        alpha_init=self.alpha_init,
+                        alpha_scale=self.alpha_scale,
+                    )
                 for _ in range(self.num_blocks)
             ]
         )
         self.predictor = HyperNormalTanhPolicy(
+            input_dim=self.hidden_dim,
             hidden_dim=self.hidden_dim,
             action_dim=self.action_dim,
             scaler_init=1.0,
@@ -103,7 +105,7 @@ class SimbaV2Critic(nn.Module):
             c_shift=self.c_shift,
         )
         self.encoder = nn.Sequential(
-            [
+            *[
                 HyperLERPBlock(
                     input_dim=self.hidden_dim,
                     hidden_dim=self.hidden_dim,
@@ -127,7 +129,7 @@ class SimbaV2Critic(nn.Module):
         )
 
     def forward(self, observations: torch.tensor, actions: torch.tensor) -> tuple[torch.tensor, dict]:
-        x = torch.concatenate((observations, actions), axis=1)
+        x = torch.concatenate((observations, actions), dim=-1)
         y = self.embedder(x)
         z = self.encoder(y)
         q, info = self.predictor(z)

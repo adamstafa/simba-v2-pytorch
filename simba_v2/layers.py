@@ -1,12 +1,12 @@
 import math
 import torch
 import torch.nn as nn
-import torch.functional as F
+import torch.nn.functional as F
 
 
 def l2normalize(x: torch.tensor, dim: int, eps: float = 1e-8) -> torch.tensor:
     l2norm = torch.norm(x, p=2, dim=dim, keepdim=True)
-    return x / torch.max(l2norm, eps)
+    return x / l2norm.clamp_min(eps)
 
 
 class Scaler(nn.Module):
@@ -17,6 +17,7 @@ class Scaler(nn.Module):
         self.scale = scale
 
         self.scaler = nn.Parameter(torch.ones(dim) * self.scale)
+        self.forward_scaler = self.init / self.scale
 
     def forward(self, x: torch.tensor) -> torch.tensor:
         return self.scaler * self.forward_scaler * x
@@ -58,9 +59,9 @@ class HyperMLP(nn.Module):
     def forward(self, x: torch.tensor) -> torch.tensor:
         x = self.w1(x)
         x = self.scaler(x)
-        x = nn.ReLU(x) + self.eps
+        x = F.relu(x) + self.eps
+        x = self.w2(x)
         x = l2normalize(x, dim=-1)
-
         return x
 
 
@@ -74,7 +75,7 @@ class HyperEmbedder(nn.Module):
         self.scaler_scale = scaler_scale
         self.c_shift = c_shift
 
-        self.w = HyperDense(self.input_dim, self.hidden_dim - 1)  # -1 for the shift
+        self.w = HyperDense(self.input_dim + 1, self.hidden_dim)  # +1 for the shift
         self.scaler = Scaler(self.hidden_dim,
                              self.scaler_init,
                              self.scaler_scale)
@@ -82,10 +83,10 @@ class HyperEmbedder(nn.Module):
     def forward(self, x: torch.tensor) -> torch.tensor:
         new_axis = torch.ones((x.shape[:-1] + (1,))) * self.c_shift
         x = torch.concatenate([x, new_axis], axis=-1)
-        x = l2normalize(x, axis=-1)
+        x = l2normalize(x, dim=-1)
         x = self.w(x)
         x = self.scaler(x)
-        x = l2normalize(x, axis=-1)
+        x = l2normalize(x, dim=-1)
 
         return x
 
@@ -104,7 +105,7 @@ class HyperLERPBlock(nn.Module):
         self.expansion = expansion
 
         self.mlp = HyperMLP(
-            input_dim,
+            input_dim=self.input_dim,
             output_dim=self.hidden_dim,
             hidden_dim=self.hidden_dim * self.expansion,
             scaler_init=self.scaler_init / math.sqrt(self.expansion),
@@ -120,7 +121,7 @@ class HyperLERPBlock(nn.Module):
         residual = x
         x = self.mlp(x)
         x = residual + self.alpha_scaler(x - residual)
-        x = l2normalize(x, axis=-1)
+        x = l2normalize(x, dim=-1)
 
         return x
 
@@ -177,7 +178,7 @@ class HyperNormalTanhPolicy(nn.Module):
 
         # tanh(N(mu, sigma))
         dist = torch.distributions.TransformedDistribution(
-            distribution=dist,
+            dist,
             transforms=[torch.distributions.transforms.TanhTransform()]
         )
 
@@ -203,7 +204,7 @@ class HyperCategoricalValue(nn.Module):
         self.bin_values = torch.linspace(
             start=self.min_v, end=self.max_v, steps=self.num_bins
         ).reshape(1, -1)
-        self.softmax = nn.Softmax(dim=1)
+        self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x: torch.tensor) -> torch.tensor:
         value = self.w1(x)
@@ -211,7 +212,7 @@ class HyperCategoricalValue(nn.Module):
         value = self.w2(value) + self.bias
 
         log_prob = self.softmax(value)
-        value = torch.sum(torch.exp(log_prob) * self.bin_values, dim=1)
+        value = torch.sum(torch.exp(log_prob) * self.bin_values, dim=-1)
 
         info = {"log_prob": log_prob}
         return value, info
