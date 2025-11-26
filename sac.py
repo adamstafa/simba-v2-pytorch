@@ -28,17 +28,17 @@ class Args:
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
-    track: bool = False
+    track: bool = True
     """if toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "cleanRL"
     """the wandb's project name"""
     wandb_entity: str = "adam-stafa-org"
     """the entity (team) of wandb's project"""
-    capture_video: bool = True
+    capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
 
     # Algorithm specific arguments
-    env_id: str = "Hopper-v4"
+    env_id: str = "Humanoid-v4"
     """the environment id of the task"""
     total_timesteps: int = 1000000
     """total timesteps of the experiments"""
@@ -166,7 +166,7 @@ if __name__ == "__main__":
             sync_tensorboard=True,
             config=vars(args),
             name=run_name,
-            monitor_gym=True,
+            monitor_gym=False,
             save_code=True,
         )
     writer = SummaryWriter(f"runs/{run_name}")
@@ -181,7 +181,7 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
