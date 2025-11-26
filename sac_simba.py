@@ -21,7 +21,7 @@ from buffers import ReplayBuffer
 from simba_v2.networks import SimbaV2Actor, SimbaV2Critic
 from simba_v2.update import categorical_td_loss
 
-# torch.set_default_device("cuda:1")
+torch.set_default_device("cuda:1")
 REWARD_SCALE = 0.005
 
 @dataclass
@@ -40,7 +40,7 @@ class Args:
     """the wandb's project name"""
     wandb_entity: str = "adam-stafa-org"
     """the entity (team) of wandb's project"""
-    capture_video: bool = False
+    capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
 
     # Algorithm specific arguments
@@ -78,7 +78,7 @@ def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
         if capture_video and idx == 0:
             env = gym.make(env_id, render_mode="rgb_array")
-            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger=lambda x: True)
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -208,8 +208,8 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    # device = torch.device("cuda:1" if torch.cuda.is_available() and args.cuda else "cpu")
-    device = torch.device("cpu")
+    device = torch.device("cuda:1" if torch.cuda.is_available() and args.cuda else "cpu")
+    # device = torch.device("cpu")
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
