@@ -93,16 +93,24 @@ class SoftQNetwork(nn.Module):
         super().__init__()
         obs_dim = env.single_observation_space.shape[0]
         action_dim = env.single_action_space.shape[0]
+        hidden_dim = 64
+        num_blocks = 2
+        scaler_init = math.sqrt(2 / hidden_dim)
+        scaler_scale = math.sqrt(2 / hidden_dim)
+        alpha_init = 1 / (num_blocks + 1)
+        alpha_scale = 1 / math.sqrt(hidden_dim)
+        c_shift = 3.0
+        
         self.critic = SimbaV2Critic(
-            num_blocks=2,
+            num_blocks=num_blocks,
             obs_dim=obs_dim,
             action_dim=action_dim,
-            hidden_dim=64,
-            scaler_init=1.0,
-            scaler_scale=1.0,
-            alpha_init=0.2,
-            alpha_scale=1.0,
-            c_shift=3.0,
+            hidden_dim=hidden_dim,
+            scaler_init=scaler_init,
+            scaler_scale=scaler_scale,
+            alpha_init=alpha_init,
+            alpha_scale=alpha_scale,
+            c_shift=c_shift,
             num_bins=101,
             min_v=-5.0,
             max_v=5.0)
@@ -124,7 +132,15 @@ class Actor(nn.Module):
         obs_dim = env.single_observation_space.shape[0]
         action_dim = env.single_action_space.shape[0]
 
-        self.actor = SimbaV2Actor(num_blocks=1, hidden_dim=64, obs_dim=obs_dim, action_dim=action_dim,scaler_init=1.0, scaler_scale=1.0, alpha_init=0.2, alpha_scale=1.0, c_shift=3.0)
+        hidden_dim = 64
+        num_blocks = 1
+        scaler_init = math.sqrt(2 / hidden_dim)
+        scaler_scale = math.sqrt(2 / hidden_dim)
+        alpha_init = 1 / (num_blocks + 1)
+        alpha_scale = 1 / math.sqrt(hidden_dim)
+        c_shift = 3.0
+
+        self.actor = SimbaV2Actor(num_blocks=num_blocks, hidden_dim=hidden_dim, obs_dim=obs_dim, action_dim=action_dim,scaler_init=scaler_init, scaler_scale=scaler_scale, alpha_init=alpha_init, alpha_scale=alpha_scale, c_shift=c_shift)
 
         # action rescaling
         self.register_buffer(
