@@ -16,11 +16,11 @@ def l2normalize_network():
 
 
 def update_actor(
-    actor: SimbaV2Actor,
-    critic: SimbaV2Critic,
-    batch: dict, # TODO: specify type
-    temperature: float):
-    
+        actor: SimbaV2Actor,
+        critic: SimbaV2Critic,
+        batch: dict,  # TODO: specify type
+        temperature: float):
+
     def actor_loss_fn(actor_params) -> tuple[torch.tensor, dict[str, float]]:
         dist, _ = actor(observations=batch["observation"])
 
@@ -28,7 +28,8 @@ def update_actor(
         log_probs = dist.log_prob(actions)
 
         # qs: (2, n)
-        qs, q_infos = critic(observations=batch["observation"], actions=actions)
+        qs, q_infos = critic(
+            observations=batch["observation"], actions=actions)
         q = torch.minimum(qs[0], qs[1])
         actor_loss = (log_probs * temperature() - q).mean()
 
@@ -38,7 +39,7 @@ def update_actor(
             "actor/mean_action": torch.mean(actions),
         }
         return actor_loss, actor_info
-    
+
     # TODO: compute loss
     # TODO: apply optimizer
     # TODO: l2 normalize weights
@@ -61,21 +62,26 @@ def categorical_td_loss(
 
     # compute target value buckets
     # target_bin_values: (n, num_bins)
-    bin_values = torch.linspace(start=min_v, stop=max_v, num=num_bins).reshape(1, -1)
-    target_bin_values = reward + gamma * (bin_values - actor_entropy) * (1.0 - done)
-    target_bin_values = torch.clip(target_bin_values, min_v, max_v)  # (B, num_bins)
+    bin_values = torch.linspace(
+        start=min_v, stop=max_v, num=num_bins).reshape(1, -1)
+    target_bin_values = reward + gamma * \
+        (bin_values - actor_entropy) * (1.0 - done)
+    target_bin_values = torch.clip(
+        target_bin_values, min_v, max_v)  # (B, num_bins)
 
     # update indices
     b = (target_bin_values - min_v) / ((max_v - min_v) / (num_bins - 1))
     l = torch.floor(b)
-    l_mask = F.one_hot(l.reshape(-1), num_bins).reshape((-1, num_bins, num_bins))
+    l_mask = F.one_hot(
+        l.reshape(-1), num_bins).reshape((-1, num_bins, num_bins))
     u = torch.ceil(b)
-    u_mask = F.one_hot(u.reshape(-1), num_bins).reshape((-1, num_bins, num_bins))
+    u_mask = F.one_hot(
+        u.reshape(-1), num_bins).reshape((-1, num_bins, num_bins))
 
     # target label
     _target_probs = torch.exp(target_log_probs)
     m_l = (_target_probs * (u + (l == u).astype(torch.float32) - b)).reshape(
-        -1, num_bins,  
+        -1, num_bins,
     )
     m_u = (_target_probs * (b - l)).reshape((-1, num_bins, 1))
     target_probs = torch.sum(m_l * l_mask + m_u * u_mask, dim=1)

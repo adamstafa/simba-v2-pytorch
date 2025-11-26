@@ -75,7 +75,8 @@ class HyperEmbedder(nn.Module):
         self.scaler_scale = scaler_scale
         self.c_shift = c_shift
 
-        self.w = HyperDense(self.input_dim + 1, self.hidden_dim)  # +1 for the shift
+        self.w = HyperDense(self.input_dim + 1,
+                            self.hidden_dim)  # +1 for the shift
         self.scaler = Scaler(self.hidden_dim,
                              self.scaler_init,
                              self.scaler_scale)
@@ -128,13 +129,13 @@ class HyperLERPBlock(nn.Module):
 
 class HyperNormalTanhPolicy(nn.Module):
     def __init__(self,
-            input_dim: int,
-            hidden_dim: int,
-            action_dim: int,
-            scaler_init: float,
-            scaler_scale: float,
-            log_std_min: float = -10.0,
-            log_std_max: float = 2.0):
+                 input_dim: int,
+                 hidden_dim: int,
+                 action_dim: int,
+                 scaler_init: float,
+                 scaler_scale: float,
+                 log_std_min: float = -10.0,
+                 log_std_max: float = 2.0):
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
@@ -145,16 +146,16 @@ class HyperNormalTanhPolicy(nn.Module):
         self.log_std_max = log_std_max
 
         self.mean_w1 = HyperDense(self.input_dim, self.hidden_dim)
-        self.mean_scaler = Scaler(self.hidden_dim, self.scaler_init, self.scaler_scale)
+        self.mean_scaler = Scaler(
+            self.hidden_dim, self.scaler_init, self.scaler_scale)
         self.mean_w2 = HyperDense(self.hidden_dim, self.action_dim)
         self.mean_bias = nn.Parameter(torch.zeros(self.action_dim))
 
         self.std_w1 = HyperDense(self.input_dim, self.hidden_dim)
-        self.std_scaler = Scaler(self.hidden_dim, self.scaler_init, self.scaler_scale)
+        self.std_scaler = Scaler(
+            self.hidden_dim, self.scaler_init, self.scaler_scale)
         self.std_w2 = HyperDense(self.hidden_dim, self.action_dim)
         self.std_bias = nn.Parameter(torch.zeros(self.action_dim))
-
-
 
     def forward(self, x: torch.tensor, temperature: float = 1.0) -> torch.distributions.Distribution:
         mean = self.mean_w1(x)
@@ -198,7 +199,8 @@ class HyperCategoricalValue(nn.Module):
         self.scaler_scale = scaler_scale
 
         self.w1 = HyperDense(input_dim, self.hidden_dim)
-        self.scaler = Scaler(self.hidden_dim, self.scaler_init, self.scaler_scale)
+        self.scaler = Scaler(
+            self.hidden_dim, self.scaler_init, self.scaler_scale)
         self.w2 = HyperDense(self.hidden_dim, self.num_bins)
         self.bias = nn.Parameter(torch.zeros(self.num_bins))
         self.bin_values = torch.linspace(

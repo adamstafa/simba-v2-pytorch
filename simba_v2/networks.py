@@ -12,15 +12,15 @@ from simba_v2.layers import (
 
 class SimbaV2Actor(nn.Module):
     def __init__(self,
-                    num_blocks: int,
-                    hidden_dim: int,
-                    obs_dim: int,
-                    action_dim: int,
-                    scaler_init: float,
-                    scaler_scale: float,
-                    alpha_init: float,
-                    alpha_scale: float,
-                    c_shift: float):
+                 num_blocks: int,
+                 hidden_dim: int,
+                 obs_dim: int,
+                 action_dim: int,
+                 scaler_init: float,
+                 scaler_scale: float,
+                 alpha_init: float,
+                 alpha_scale: float,
+                 c_shift: float):
         super().__init__()
         self.num_blocks = num_blocks
         self.hidden_dim = hidden_dim
@@ -42,13 +42,13 @@ class SimbaV2Actor(nn.Module):
         self.encoder = nn.Sequential(
             *[
                 HyperLERPBlock(
-                        input_dim=self.hidden_dim,
-                        hidden_dim=self.hidden_dim,
-                        scaler_init=self.scaler_init,
-                        scaler_scale=self.scaler_scale,
-                        alpha_init=self.alpha_init,
-                        alpha_scale=self.alpha_scale,
-                    )
+                    input_dim=self.hidden_dim,
+                    hidden_dim=self.hidden_dim,
+                    scaler_init=self.scaler_init,
+                    scaler_scale=self.scaler_scale,
+                    alpha_init=self.alpha_init,
+                    alpha_scale=self.alpha_scale,
+                )
                 for _ in range(self.num_blocks)
             ]
         )
@@ -59,7 +59,6 @@ class SimbaV2Actor(nn.Module):
             scaler_init=1.0,
             scaler_scale=1.0,
         )
-
 
     def forward(self, observations: torch.tensor, temperature: float = 1.0) -> torch.distributions.Distribution:
         x = self.embedder(observations)
@@ -72,15 +71,15 @@ class SimbaV2Actor(nn.Module):
 class SimbaV2Critic(nn.Module):
     def __init__(self, num_blocks: int,
                  obs_dim: int, action_dim: int,
-            hidden_dim: int,
-            scaler_init: float,
-            scaler_scale: float,
-            alpha_init: float,
-            alpha_scale: float,
-            c_shift: float,
-            num_bins: int,
-            min_v: float,
-            max_v: float):
+                 hidden_dim: int,
+                 scaler_init: float,
+                 scaler_scale: float,
+                 alpha_init: float,
+                 alpha_scale: float,
+                 c_shift: float,
+                 num_bins: int,
+                 min_v: float,
+                 max_v: float):
         super().__init__()
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -95,8 +94,7 @@ class SimbaV2Critic(nn.Module):
         self.num_bins = num_bins
         self.min_v = min_v
         self.max_v = max_v
-    
-    
+
         self.embedder = HyperEmbedder(
             input_dim=self.input_dim,
             hidden_dim=self.hidden_dim,
