@@ -81,7 +81,8 @@ class HyperEmbedder(nn.Module):
                              self.scaler_scale)
 
     def forward(self, x: torch.tensor) -> torch.tensor:
-        new_axis = torch.ones((x.shape[:-1] + (1,))) * self.c_shift
+        # TODO: maybe pass the device in the constructor?
+        new_axis = torch.ones((x.shape[:-1] + (1,)), device=x.device) * self.c_shift
         x = torch.concatenate([x, new_axis], axis=-1)
         x = l2normalize(x, dim=-1)
         x = self.w(x)
@@ -180,7 +181,7 @@ class HyperNormalTanhPolicy(nn.Module):
             transforms=[torch.distributions.transforms.TanhTransform()]
         )
 
-        info = {}
+        info = {'log_std': log_std, 'mean': torch.tanh(mean), 'mean_normal': mean}
         return dist, info
 
 
