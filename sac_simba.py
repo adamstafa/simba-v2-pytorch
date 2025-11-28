@@ -164,9 +164,10 @@ class Actor(nn.Module):
 
     def get_action(self, x):
         dist, info = self.actor(x)
-        sample = dist.sample()
+        sample = dist.rsample()
         log_prob = dist.log_prob(sample)
-        return dist.sample() * self.action_scale + self.action_bias, log_prob, None # TODO: maybe return mean as third value?
+        
+        return sample * self.action_scale + self.action_bias, log_prob, info # TODO: maybe return mean as third value?
 
 
 def grad_norm(optimizer):
