@@ -1,7 +1,6 @@
 import math
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 def l2normalize(x: torch.tensor, dim: int, eps: float = 1e-8) -> torch.tensor:
@@ -59,7 +58,7 @@ class HyperMLP(nn.Module):
     def forward(self, x: torch.tensor) -> torch.tensor:
         x = self.w1(x)
         x = self.scaler(x)
-        x = F.relu(x) + self.eps
+        x = torch.relu(x) + self.eps
         x = self.w2(x)
         x = l2normalize(x, dim=-1)
         return x
@@ -146,14 +145,12 @@ class HyperNormalTanhPolicy(nn.Module):
         self.log_std_max = log_std_max
 
         self.mean_w1 = HyperDense(self.input_dim, self.hidden_dim)
-        self.mean_scaler = Scaler(
-            self.hidden_dim, self.scaler_init, self.scaler_scale)
+        self.mean_scaler = Scaler(self.hidden_dim, self.scaler_init, self.scaler_scale)
         self.mean_w2 = HyperDense(self.hidden_dim, self.action_dim)
         self.mean_bias = nn.Parameter(torch.zeros(self.action_dim))
 
         self.std_w1 = HyperDense(self.input_dim, self.hidden_dim)
-        self.std_scaler = Scaler(
-            self.hidden_dim, self.scaler_init, self.scaler_scale)
+        self.std_scaler = Scaler(self.hidden_dim, self.scaler_init, self.scaler_scale)
         self.std_w2 = HyperDense(self.hidden_dim, self.action_dim)
         self.std_bias = nn.Parameter(torch.zeros(self.action_dim))
 
@@ -199,21 +196,20 @@ class HyperCategoricalValue(nn.Module):
         self.scaler_scale = scaler_scale
 
         self.w1 = HyperDense(input_dim, self.hidden_dim)
-        self.scaler = Scaler(
-            self.hidden_dim, self.scaler_init, self.scaler_scale)
+        self.scaler = Scaler(self.hidden_dim, self.scaler_init, self.scaler_scale)
         self.w2 = HyperDense(self.hidden_dim, self.num_bins)
         self.bias = nn.Parameter(torch.zeros(self.num_bins))
         self.bin_values = torch.linspace(
             start=self.min_v, end=self.max_v, steps=self.num_bins
         ).reshape(1, -1)
-        self.softmax = nn.Softmax(dim=-1)
+        self.log_softmax = nn.LogSoftmax(dim=-1)
 
     def forward(self, x: torch.tensor) -> torch.tensor:
         value = self.w1(x)
         value = self.scaler(value)
         value = self.w2(value) + self.bias
 
-        log_prob = self.softmax(value)
+        log_prob = self.log_softmax(value)
         value = torch.sum(torch.exp(log_prob) * self.bin_values, dim=-1)
 
         info = {"log_prob": log_prob}
