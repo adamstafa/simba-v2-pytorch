@@ -11,7 +11,6 @@ import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import tyro
 from torch.utils.tensorboard import SummaryWriter
@@ -64,7 +63,7 @@ class Args:
     """the learning rate of the policy network optimizer"""
     q_lr: float = 1e-3
     """the learning rate of the Q network network optimizer"""
-    policy_frequency: int = 2
+    policy_frequency: int = 1
     """the frequency of training policy (delayed)"""
     target_network_frequency: int = 1  # Denis Yarats' implementation delays this by 2.
     """the frequency of updates for the target nerworks"""
@@ -280,7 +279,7 @@ if __name__ == "__main__":
         if global_step > args.learning_starts:
             data = rb.sample(args.batch_size)
             with torch.no_grad():
-                next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
+                next_state_actions, next_state_log_pi, action_info = actor.get_action(data.next_observations)
                 qf1_next_target, qf1_target_log_prob = qf1_target(data.next_observations, next_state_actions, return_log_probs=True)
                 qf2_next_target, qf2_target_log_prob = qf2_target(data.next_observations, next_state_actions, return_log_probs=True)
 
@@ -326,8 +325,8 @@ if __name__ == "__main__":
                     target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
             if global_step % 100 == 0:
-                writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
-                writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), global_step)
+                writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item() / REWARD_SCALE, global_step)
+                writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item() / REWARD_SCALE, global_step)
                 writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
                 writer.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step)
                 writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
@@ -335,6 +334,8 @@ if __name__ == "__main__":
                 writer.add_scalar("losses/alpha", alpha, global_step)
                 writer.add_scalar("gradients/actor_norm", grad_norm(actor_optimizer), global_step)
                 writer.add_scalar("gradients/qf_norm", grad_norm(q_optimizer), global_step)
+                wandb.log({"backups/action_log_std": action_info['log_std'], "global_step": global_step})
+                wandb.log({"backups/action_mean": action_info['mean'], "global_step": global_step})
                 print("SPS:", int(global_step / (time.time() - start_time)))
                 writer.add_scalar(
                     "charts/SPS",
