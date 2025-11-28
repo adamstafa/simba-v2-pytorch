@@ -25,6 +25,9 @@ from tensordict.nn import CudaGraphModule, TensorDictModule
 # from stable_baselines3.common.buffers import ReplayBuffer
 from torchrl.data import LazyTensorStorage, ReplayBuffer
 
+from simba_v2.networks import SimbaV2Actor, SimbaV2Critic
+from simba_v2.update import categorical_td_loss
+
 
 @dataclass
 class Args:
@@ -36,7 +39,7 @@ class Args:
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
-    capture_video: bool = False
+    capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
 
     # Algorithm specific arguments
@@ -56,7 +59,7 @@ class Args:
     """timestep to start learning"""
     policy_lr: float = 3e-4
     """the learning rate of the policy network optimizer"""
-    q_lr: float = 1e-3
+    q_lr: float = 3e-4
     """the learning rate of the Q network network optimizer"""
     policy_frequency: int = 2
     """the frequency of training policy (delayed)"""
@@ -67,9 +70,9 @@ class Args:
     autotune: bool = True
     """automatic tuning of the entropy coefficient"""
 
-    compile: bool = False
+    compile: bool = True
     """whether to use torch.compile."""
-    cudagraphs: bool = False
+    cudagraphs: bool = True
     """whether to use cudagraphs on top of compile."""
 
     measure_burnin: int = 3
@@ -92,63 +95,84 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 
 # ALGO LOGIC: initialize agent here:
 class SoftQNetwork(nn.Module):
-    def __init__(self, env, n_act, n_obs, device=None):
+    def __init__(self, envs, n_act, n_obs):
         super().__init__()
-        self.fc1 = nn.Linear(n_act + n_obs, 256, device=device)
-        self.fc2 = nn.Linear(256, 256, device=device)
-        self.fc3 = nn.Linear(256, 1, device=device)
+        obs_dim = n_obs
+        action_dim = n_act
+        hidden_dim = 64
+        num_blocks = 2
+        scaler_init = math.sqrt(2 / hidden_dim)
+        scaler_scale = math.sqrt(2 / hidden_dim)
+        alpha_init = 1 / (num_blocks + 1)
+        alpha_scale = 1 / math.sqrt(hidden_dim)
+        c_shift = 3.0
+        
+        self.critic = SimbaV2Critic(
+            num_blocks=num_blocks,
+            obs_dim=obs_dim,
+            action_dim=action_dim,
+            hidden_dim=hidden_dim,
+            scaler_init=scaler_init,
+            scaler_scale=scaler_scale,
+            alpha_init=alpha_init,
+            alpha_scale=alpha_scale,
+            c_shift=c_shift,
+            num_bins=101,
+            min_v=-5.0,
+            max_v=5.0)
 
-    def forward(self, x, a):
-        x = torch.cat([x, a], 1)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
+    def forward(self, x, a, return_log_probs):
+        q, info = self.critic(x, a)
 
+        if return_log_probs:
+            return q, info['log_prob']
+        return q
 
 LOG_STD_MAX = 2
 LOG_STD_MIN = -5
 
 
 class Actor(nn.Module):
-    def __init__(self, env, n_obs, n_act, device=None):
+    def __init__(self, envs, n_act, n_obs):
         super().__init__()
-        self.fc1 = nn.Linear(n_obs, 256, device=device)
-        self.fc2 = nn.Linear(256, 256, device=device)
-        self.fc_mean = nn.Linear(256, n_act, device=device)
-        self.fc_logstd = nn.Linear(256, n_act, device=device)
+        obs_dim = n_obs
+        action_dim = n_act
+
+        hidden_dim = 64
+        num_blocks = 1
+        scaler_init = math.sqrt(2 / hidden_dim)
+        scaler_scale = math.sqrt(2 / hidden_dim)
+        alpha_init = 1 / (num_blocks + 1)
+        alpha_scale = 1 / math.sqrt(hidden_dim)
+        c_shift = 3.0
+
+        self.actor = SimbaV2Actor(num_blocks=num_blocks, hidden_dim=hidden_dim, obs_dim=obs_dim, action_dim=action_dim,scaler_init=scaler_init, scaler_scale=scaler_scale, alpha_init=alpha_init, alpha_scale=alpha_scale, c_shift=c_shift)
+
         # action rescaling
         self.register_buffer(
             "action_scale",
-            torch.tensor((env.action_space.high - env.action_space.low) / 2.0, dtype=torch.float32, device=device),
+            torch.tensor(
+                (envs.single_action_space.high - envs.single_action_space.low) / 2.0,
+                dtype=torch.float32,
+            ),
         )
         self.register_buffer(
             "action_bias",
-            torch.tensor((env.action_space.high + env.action_space.low) / 2.0, dtype=torch.float32, device=device),
+            torch.tensor(
+                (envs.single_action_space.high + envs.single_action_space.low) / 2.0,
+                dtype=torch.float32,
+            ),
         )
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        mean = self.fc_mean(x)
-        log_std = self.fc_logstd(x)
-        log_std = torch.tanh(log_std)
-        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (log_std + 1)  # From SpinUp / Denis Yarats
-
-        return mean, log_std
+        return self.get_action(x)
 
     def get_action(self, x):
-        mean, log_std = self(x)
-        std = log_std.exp()
-        normal = torch.distributions.Normal(mean, std)
-        x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
-        y_t = torch.tanh(x_t)
-        action = y_t * self.action_scale + self.action_bias
-        log_prob = normal.log_prob(x_t)
-        # Enforcing Action Bound
-        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
-        log_prob = log_prob.sum(1, keepdim=True)
-        mean = torch.tanh(mean) * self.action_scale + self.action_bias
+        dist, info = self.actor(x)
+        sample = dist.rsample()
+        log_prob = dist.log_prob(sample)
+        action = sample * self.action_scale + self.action_bias
+        mean = info['mean']
         return action, log_prob, mean
 
 
@@ -170,6 +194,7 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    torch.set_default_device(device)
 
     # env setup
     envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, 0, args.capture_video, run_name)])
@@ -179,20 +204,20 @@ if __name__ == "__main__":
 
     max_action = float(envs.single_action_space.high[0])
 
-    actor = Actor(envs, device=device, n_act=n_act, n_obs=n_obs)
-    actor_detach = Actor(envs, device=device, n_act=n_act, n_obs=n_obs)
+    actor = Actor(envs, n_act=n_act, n_obs=n_obs)
+    actor_detach = Actor(envs, n_act=n_act, n_obs=n_obs)
     # Copy params to actor_detach without grad
     from_module(actor).data.to_module(actor_detach)
-    policy = TensorDictModule(actor_detach.get_action, in_keys=["observation"], out_keys=["action"])
+    policy = TensorDictModule(actor_detach.get_action, in_keys=["observation"], out_keys=["action", "log_prob", "mean"])
 
     def get_q_params():
-        qf1 = SoftQNetwork(envs, device=device, n_act=n_act, n_obs=n_obs)
-        qf2 = SoftQNetwork(envs, device=device, n_act=n_act, n_obs=n_obs)
+        qf1 = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
+        qf2 = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
         qnet_params = from_modules(qf1, qf2, as_module=True)
         qnet_target = qnet_params.data.clone()
 
         # discard params of net
-        qnet = SoftQNetwork(envs, device="meta", n_act=n_act, n_obs=n_obs)
+        qnet = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to("meta")
         qnet_params.to_module(qnet)
 
         return qnet_params, qnet_target, qnet
@@ -216,30 +241,26 @@ if __name__ == "__main__":
 
     def batched_qf(params, obs, action, next_q_value=None):
         with params.to_module(qnet):
-            vals = qnet(obs, action)
-            if next_q_value is not None:
-                loss_val = F.mse_loss(vals.view(-1), next_q_value)
-                return loss_val
-            return vals
+            vals, log_probs = qnet(obs, action, return_log_probs=True)
+            return vals, log_probs
 
     def update_main(data):
         # optimize the model
         q_optimizer.zero_grad()
+        
         with torch.no_grad():
             next_state_actions, next_state_log_pi, _ = actor.get_action(data["next_observations"])
-            qf_next_target = torch.vmap(batched_qf, (0, None, None))(
-                qnet_target, data["next_observations"], next_state_actions
-            )
-            min_qf_next_target = qf_next_target.min(dim=0).values - alpha * next_state_log_pi
-            next_q_value = data["rewards"].flatten() + (
-                ~data["dones"].flatten()
-            ).float() * args.gamma * min_qf_next_target.view(-1)
+            q_target_vals, q_target_log_probs = torch.vmap(batched_qf, (0, None, None))(
+                qnet_target, data["next_observations"], next_state_actions)
+            target_log_probs = q_target_log_probs[q_target_vals.argmin(dim=0), torch.arange(args.batch_size)]
 
-        qf_a_values = torch.vmap(batched_qf, (0, None, None, None))(
-            qnet_params, data["observations"], data["actions"], next_q_value
-        )
-        qf_loss = qf_a_values.sum(0)
-
+        rewards = data["rewards"].flatten()
+        dones = data["dones"].flatten()
+        q_vals, log_probs = torch.vmap(batched_qf, (0, None, None))(
+                qnet_params, data["observations"], data["actions"])
+        
+        qf_loss = torch.vmap(categorical_td_loss, (0, None, None, None, None, None, None, None, None, None))(
+            log_probs, target_log_probs, rewards, dones, next_state_log_pi, alpha, args.gamma, 101, -5.0, 5.0).sum(0)
         qf_loss.backward()
         q_optimizer.step()
         return TensorDict(qf_loss=qf_loss.detach())
@@ -247,7 +268,7 @@ if __name__ == "__main__":
     def update_pol(data):
         actor_optimizer.zero_grad()
         pi, log_pi, _ = actor.get_action(data["observations"])
-        qf_pi = torch.vmap(batched_qf, (0, None, None))(qnet_params.data, data["observations"], pi)
+        qf_pi, _ = torch.vmap(batched_qf, (0, None, None))(qnet_params.data, data["observations"], pi)
         min_qf_pi = qf_pi.min(0).values
         actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
 
@@ -298,7 +319,7 @@ if __name__ == "__main__":
         if global_step < args.learning_starts:
             actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
         else:
-            actions = policy(obs)
+            actions = policy(obs)[0]
             actions = actions.cpu().numpy()
 
         # TRY NOT TO MODIFY: execute the game and log data.

@@ -51,6 +51,7 @@ def categorical_td_loss(
     reward: torch.tensor,  # (n,)
     done: torch.tensor,  # (n,)
     actor_entropy: torch.tensor,  # (n,)
+    alpha: float,
     gamma: float,
     num_bins: int,
     min_v: float,
@@ -62,15 +63,17 @@ def categorical_td_loss(
 
     # compute target value buckets
     # target_bin_values: (n, num_bins)
-    bin_values = torch.linspace(start=min_v, end=max_v, steps=num_bins).reshape(1, -1)
-    target_bin_values = reward + gamma * (bin_values - actor_entropy) * (1.0 - done)
+    bin_values = torch.linspace(start=min_v, end=max_v, steps=num_bins, device=pred_log_probs.device).reshape(1, -1)
+    target_bin_values = reward + gamma * (bin_values - alpha * actor_entropy) * ~done
     target_bin_values = torch.clip(target_bin_values, min_v, max_v)  # (B, num_bins)
 
     # update indices
     b = (target_bin_values - min_v) / ((max_v - min_v) / (num_bins - 1))
     l = torch.floor(b).long()
+    # l = torch.clamp(l, 0, num_bins - 1)  # TODO: investigate why this happens
     l_mask = F.one_hot(l.reshape(-1), num_bins).reshape((-1, num_bins, num_bins))
     u = torch.ceil(b).long()
+    # u = torch.clamp(u, 0, num_bins - 1)  # TODO: investigate why this happens
     u_mask = F.one_hot(u.reshape(-1), num_bins).reshape((-1, num_bins, num_bins))
 
     # target label
