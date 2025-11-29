@@ -39,7 +39,7 @@ class Args:
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
-    capture_video: bool = True
+    capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
 
     # Algorithm specific arguments
@@ -57,11 +57,11 @@ class Args:
     """the batch size of sample from the reply memory"""
     learning_starts: int = 5e3
     """timestep to start learning"""
-    policy_lr: float = 3e-4
+    policy_lr: float = 1e-4
     """the learning rate of the policy network optimizer"""
-    q_lr: float = 3e-4
+    q_lr: float = 1e-4
     """the learning rate of the Q network network optimizer"""
-    policy_frequency: int = 2
+    policy_frequency: int = 1
     """the frequency of training policy (delayed)"""
     target_network_frequency: int = 1  # Denis Yarats' implementation delays this by 2.
     """the frequency of updates for the target nerworks"""
@@ -70,9 +70,9 @@ class Args:
     autotune: bool = True
     """automatic tuning of the entropy coefficient"""
 
-    compile: bool = True
+    compile: bool = False
     """whether to use torch.compile."""
-    cudagraphs: bool = True
+    cudagraphs: bool = False
     """whether to use cudagraphs on top of compile."""
 
     measure_burnin: int = 3
@@ -99,7 +99,7 @@ class SoftQNetwork(nn.Module):
         super().__init__()
         obs_dim = n_obs
         action_dim = n_act
-        hidden_dim = 64
+        hidden_dim = 256
         num_blocks = 2
         scaler_init = math.sqrt(2 / hidden_dim)
         scaler_scale = math.sqrt(2 / hidden_dim)
@@ -127,9 +127,14 @@ class SoftQNetwork(nn.Module):
         if return_log_probs:
             return q, info['log_prob']
         return q
+    
+    def normalize_weights(self):
+        self.critic.normalize_weights()
 
 LOG_STD_MAX = 2
 LOG_STD_MIN = -5
+
+REWARD_SCALE = 0.05
 
 
 class Actor(nn.Module):
@@ -138,7 +143,7 @@ class Actor(nn.Module):
         obs_dim = n_obs
         action_dim = n_act
 
-        hidden_dim = 64
+        hidden_dim = 128
         num_blocks = 1
         scaler_init = math.sqrt(2 / hidden_dim)
         scaler_scale = math.sqrt(2 / hidden_dim)
@@ -324,11 +329,12 @@ if __name__ == "__main__":
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
+        rewards *= REWARD_SCALE
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if "final_info" in infos:
             for info in infos["final_info"]:
-                r = float(info["episode"]["r"])
+                r = float(info["episode"]["r"]) / REWARD_SCALE
                 max_ep_ret = max(max_ep_ret, r)
                 avg_returns.append(r)
             desc = (
@@ -367,6 +373,15 @@ if __name__ == "__main__":
                     out_main.update(update_pol(data))
 
                     alpha.copy_(log_alpha.detach().exp())
+            
+            # Normalize eweights
+            with torch.no_grad():
+                qnet_params[0].to_module(qnet)
+                qnet.normalize_weights()
+                qnet_params[0, ...] = from_module(qnet)
+                qnet_params[1].to_module(qnet)
+                qnet.normalize_weights()
+                qnet_params[1, ...] = from_module(qnet)
 
             # update the target networks
             if global_step % args.target_network_frequency == 0:
