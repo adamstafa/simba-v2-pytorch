@@ -36,6 +36,9 @@ class HyperDense(nn.Module):
 
     def forward(self, x: torch.tensor) -> torch.tensor:
         return self.linear(x)
+    
+    def normalize_weights(self):
+        self.linear.weight.data /= torch.norm(self.linear.weight.data, p=2.0)
 
 
 class HyperMLP(nn.Module):
@@ -63,6 +66,9 @@ class HyperMLP(nn.Module):
         x = l2normalize(x, dim=-1)
         return x
 
+    def normalize_weights(self):
+        self.w1.normalize_weights()
+        self.w2.normalize_weights()
 
 class HyperEmbedder(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, scaler_init: float,
@@ -90,6 +96,9 @@ class HyperEmbedder(nn.Module):
         x = l2normalize(x, dim=-1)
 
         return x
+
+    def normalize_weights(self):
+        self.w.normalize_weights()
 
 
 class HyperLERPBlock(nn.Module):
@@ -125,6 +134,9 @@ class HyperLERPBlock(nn.Module):
         x = l2normalize(x, dim=-1)
 
         return x
+
+    def normalize_weights(self):
+        self.mlp.normalize_weights()
 
 
 class HyperNormalTanhPolicy(nn.Module):
@@ -183,6 +195,12 @@ class HyperNormalTanhPolicy(nn.Module):
 
         info = {'log_std': log_std, 'mean': torch.tanh(mean), 'mean_normal': mean}
         return dist, info
+    
+    def normalize_weights(self):
+        self.mean_w1.normalize_weights()
+        self.mean_w2.normalize_weights()
+        self.std_w1.normalize_weights()
+        self.std_w2.normalize_weights()
 
 
 class HyperCategoricalValue(nn.Module):
@@ -215,3 +233,7 @@ class HyperCategoricalValue(nn.Module):
 
         info = {"log_prob": log_prob}
         return value, info
+    
+    def normalize_weights(self):
+        self.w1.normalize_weights()
+        self.w2.normalize_weights()

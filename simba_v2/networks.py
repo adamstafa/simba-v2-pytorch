@@ -67,6 +67,12 @@ class SimbaV2Actor(nn.Module):
 
         return dist, info
 
+    def normalize_weights(self):
+        self.embedder.normalize_weights()
+        for block in self.encoder:
+            block.normalize_weights()
+        self.predictor.normalize_weights()
+
 
 class SimbaV2Critic(nn.Module):
     def __init__(self, num_blocks: int,
@@ -132,6 +138,12 @@ class SimbaV2Critic(nn.Module):
         z = self.encoder(y)
         q, info = self.predictor(z)
         return q, info
+    
+    def normalize_weights(self):
+        self.embedder.normalize_weights()
+        for block in self.encoder:
+            block.normalize_weights()
+        self.predictor.normalize_weights()
 
 
 # class SimbaV2DoubleCritic(nn.Module):
