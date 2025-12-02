@@ -221,14 +221,16 @@ if __name__ == "__main__":
     actor = Actor(envs, n_act=n_act, n_obs=n_obs)
     qf1 = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf2 = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
-    qf1.normalize_weights()
-    qf2.normalize_weights()
     qf1_target = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf2_target = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
+
+    actor.normalize_weights()
+    qf1.normalize_weights()
+    qf2.normalize_weights()
 
     # Automatic entropy tuning
     if args.autotune:
