@@ -49,7 +49,7 @@ class Args:
     """total timesteps of the experiments"""
     buffer_size: int = int(1e6)
     """the replay memory buffer size"""
-    gamma: float = 0.98
+    gamma: float = 0.99
     """the discount factor gamma"""
     tau: float = 0.005
     """target smoothing coefficient (default: 0.005)"""
@@ -67,7 +67,7 @@ class Args:
     """the frequency of updates for the target nerworks"""
     alpha: float = 0.2
     """Entropy regularization coefficient."""
-    autotune: bool = True
+    autotune: bool = False
     """automatic tuning of the entropy coefficient"""
 
     compile: bool = True
@@ -86,7 +86,7 @@ def make_env(env_id, seed, idx, capture_video, run_name):
             env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         else:
             env = gym.make(env_id)
-        env = gym.wrappers.normalize.NormalizeObservation(env)
+        # env = gym.wrappers.normalize.NormalizeObservation(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env.action_space.seed(seed)
         return env
@@ -122,12 +122,9 @@ class SoftQNetwork(nn.Module):
             min_v=-5.0,
             max_v=5.0)
 
-    def forward(self, x, a, return_log_probs):
+    def forward(self, x, a):
         q, info = self.critic(x, a)
-
-        if return_log_probs:
-            return q, info['log_prob']
-        return q
+        return q, info['log_prob']
     
     def normalize_weights(self):
         self.critic.normalize_weights()
@@ -221,12 +218,11 @@ if __name__ == "__main__":
     n_obs = math.prod(envs.single_observation_space.shape)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
-    max_action = float(envs.single_action_space.high[0])
-
     actor = Actor(envs, n_act=n_act, n_obs=n_obs)
-
     qf1 = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf2 = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
+    qf1.normalize_weights()
+    qf2.normalize_weights()
     qf1_target = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf2_target = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
@@ -241,15 +237,12 @@ if __name__ == "__main__":
         alpha = log_alpha.detach().exp()
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr, capturable=args.cudagraphs and not args.compile)
     else:
-        alpha = torch.as_tensor(args.alpha, device=device)
+        alpha = torch.as_tensor(args.alpha, device=device) * REWARD_SCALE
 
     envs.single_observation_space.dtype = np.float32
     rb = ReplayBuffer(storage=LazyTensorStorage(args.buffer_size, device=device))
 
     def update_qnets(data):
-        # optimize the model
-        q_optimizer.zero_grad()
-        
         with torch.no_grad():
             observations = data["observations"]
             actions = data["actions"]
@@ -258,52 +251,62 @@ if __name__ == "__main__":
             dones = data["dones"].flatten()
 
             next_state_actions, next_state_log_pi, _ = actor.get_action(next_observations)
-            qf1_next_target, qf1_target_log_prob = qf1_target(next_observations, next_state_actions, return_log_probs=True)
-            qf2_next_target, qf2_target_log_prob = qf2_target(next_observations, next_state_actions, return_log_probs=True)
+            qf1_next_target, qf1_target_log_prob = qf1_target(next_observations, next_state_actions)
+            qf2_next_target, qf2_target_log_prob = qf2_target(next_observations, next_state_actions)
             qf_stack = torch.stack([qf1_next_target, qf2_next_target], dim=0)
             qf_log_prob_stack = torch.stack([qf1_target_log_prob, qf2_target_log_prob], dim=0)
             min_idx = torch.argmin(qf_stack, dim=0)
             target_log_probs = qf_log_prob_stack[min_idx, torch.arange(qf_log_prob_stack.shape[1])]
+            min_qf_next_target = qf_stack[min_idx, torch.arange(qf_stack.shape[1])] - alpha * next_state_log_pi
+            next_q_value = rewards + (~ dones) * args.gamma * (min_qf_next_target)
 
-        qf1_a_values, qf1_log_probs = qf1(observations, actions, return_log_probs=True)
-        qf2_a_values, qf2_log_probs = qf2(observations, actions, return_log_probs=True)
+        qf1_a_values, qf1_log_probs = qf1(observations, actions)
+        qf2_a_values, qf2_log_probs = qf2(observations, actions)
+
+        # MSE loss
+        # qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
+        # qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
+
+        # Distributional loss
         qf1_loss = categorical_td_loss(qf1_log_probs, target_log_probs, rewards, dones, next_state_log_pi, alpha, args.gamma, 101, -5.0, 5.0)
         qf2_loss = categorical_td_loss(qf2_log_probs, target_log_probs, rewards, dones, next_state_log_pi, alpha, args.gamma, 101, -5.0, 5.0)
         qf_loss = qf1_loss + qf2_loss
 
+        q_optimizer.zero_grad()
         qf_loss.backward()
         q_optimizer.step()
         return TensorDict(qf_loss=qf_loss.detach(), qvals=qf1_a_values.detach())
 
     def update_policy(data):
-        actor_optimizer.zero_grad()
         pi, log_pi, _ = actor.get_action(data["observations"])
-
-        qf1_pi, _ = qf1_target(data["observations"], pi, return_log_probs=True)
-        qf2_pi, _ = qf2_target(data["observations"], pi, return_log_probs=True)
-        min_qf_pi = torch.min(torch.stack([qf1_pi, qf2_pi], dim=0))
-
+        qf1_pi, _ = qf1(data["observations"], pi)
+        qf2_pi, _ = qf2(data["observations"], pi)
+        min_qf_pi = torch.min(qf1_pi, qf2_pi)
         actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
 
+        actor_optimizer.zero_grad()
         actor_loss.backward()
         actor_optimizer.step()
 
         if args.autotune:
             a_optimizer.zero_grad()
             with torch.no_grad():
-                _, log_pi, _ = actor.get_action(data["observations"])
+                _, log_pi, _ = actor.get_action(data["observations"]) # TODO: already evaluated, use computed result
             alpha_loss = (-log_alpha.exp() * (log_pi + target_entropy)).mean()
 
             alpha_loss.backward()
             a_optimizer.step()
+
+        alpha_loss = torch.tensor(0)
         return TensorDict(alpha=alpha.detach(), actor_loss=actor_loss.detach(), alpha_loss=alpha_loss.detach())
     
     def update_params():
         with torch.no_grad():
             # Normalize weights
-            qf1.normalize_weights()
-            qf2.normalize_weights()
-            actor.normalize_weights()
+            # TODO: evaluate the effect of weight normalization
+            # qf1.normalize_weights()
+            # qf2.normalize_weights()
+            # actor.normalize_weights()
             # update the target networks
             for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
                 target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
@@ -371,7 +374,6 @@ if __name__ == "__main__":
         for idx, trunc in enumerate(truncations):
             if trunc:
                 real_next_obs[idx] = torch.as_tensor(infos["final_observation"][idx], device=device, dtype=torch.float)
-        # obs = torch.as_tensor(obs, device=device, dtype=torch.float)
         transition = TensorDict(
             observations=obs,
             next_observations=real_next_obs,
@@ -390,14 +392,7 @@ if __name__ == "__main__":
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
             out = update_qnets(data)
-            if global_step % args.policy_frequency == 0:  # TD 3 Delayed update support
-                for _ in range(
-                    args.policy_frequency
-                ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
-                    out.update(update_policy(data))
-
-                    alpha.copy_(log_alpha.detach().exp())
-            
+            out.update(update_policy(data))
             update_params()
 
             if global_step % 100 == 0 and start_time is not None:
