@@ -59,7 +59,7 @@ class Args:
     """timestep to start learning"""
     policy_lr: float = 1e-4
     """the learning rate of the policy network optimizer"""
-    q_lr: float = 1e-3
+    q_lr: float = 1e-4
     """the learning rate of the Q network network optimizer"""
     policy_frequency: int = 1
     """the frequency of training policy (delayed)"""
@@ -132,7 +132,7 @@ class SoftQNetwork(nn.Module):
 LOG_STD_MAX = 2
 LOG_STD_MIN = -5
 
-REWARD_SCALE = 0.01
+REWARD_SCALE = 0.0025
 
 
 class Actor(nn.Module):
