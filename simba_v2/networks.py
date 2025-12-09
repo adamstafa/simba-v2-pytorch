@@ -60,12 +60,10 @@ class SimbaV2Actor(nn.Module):
             scaler_scale=1.0,
         )
 
-    def forward(self, observations: torch.tensor, temperature: float = 1.0) -> torch.distributions.Distribution:
+    def forward(self, observations: torch.tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = self.embedder(observations)
         x = self.encoder(x)
-        dist, info = self.predictor(x, temperature)
-
-        return dist, info
+        return self.predictor(x)
 
     def normalize_weights(self):
         self.embedder.normalize_weights()

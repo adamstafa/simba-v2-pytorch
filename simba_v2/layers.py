@@ -169,7 +169,7 @@ class HyperNormalTanhPolicy(nn.Module):
         self.std_w2 = HyperDense(self.hidden_dim, self.action_dim)
         self.std_bias = nn.Parameter(torch.zeros(self.action_dim))
 
-    def forward(self, x: torch.tensor, temperature: float = 1.0) -> torch.distributions.Distribution:
+    def forward(self, x: torch.tensor) -> tuple[torch.Tensor, torch.Tensor]:
         mean = self.mean_w1(x)
         mean = self.mean_scaler(mean)
         mean = self.mean_w2(mean) + self.mean_bias
@@ -183,20 +183,7 @@ class HyperNormalTanhPolicy(nn.Module):
             1 + torch.tanh(log_std)
         )
 
-        # N(mu, exp(log_sigma))
-        dist = torch.distributions.MultivariateNormal(
-            loc=mean,
-            scale_tril=torch.diag_embed(torch.exp(log_std) * temperature),
-        )
-
-        # tanh(N(mu, sigma))
-        dist = torch.distributions.TransformedDistribution(
-            dist,
-            transforms=[torch.distributions.transforms.TanhTransform()]
-        )
-
-        info = {'log_std': log_std, 'mean': torch.tanh(mean), 'mean_normal': mean}
-        return dist, info
+        return mean, log_std
     
     def normalize_weights(self):
         self.mean_w1.normalize_weights()
