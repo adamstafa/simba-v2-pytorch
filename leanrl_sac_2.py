@@ -306,9 +306,9 @@ if __name__ == "__main__":
         with torch.no_grad():
             # Normalize weights
             # TODO: evaluate the effect of weight normalization
-            # qf1.normalize_weights()
-            # qf2.normalize_weights()
-            # actor.normalize_weights()
+            qf1.normalize_weights()
+            qf2.normalize_weights()
+            actor.normalize_weights()
             # update the target networks
             for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
                 target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
