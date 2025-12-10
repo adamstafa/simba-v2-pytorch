@@ -40,7 +40,8 @@ class HyperDense(nn.Module):
     def normalize_weights(self):
         eps = 1e-8
         weight_norm = torch.norm(self.linear.weight.data, p=2, dim=1, keepdim=True)
-        self.linear.weight.data /= weight_norm.clamp(eps)
+        # Using /= breaks torch.compile, use div_ instead
+        self.linear.weight.data.div_(weight_norm.clamp_min(eps))
 
 
 class HyperMLP(nn.Module):
