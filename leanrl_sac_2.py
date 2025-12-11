@@ -216,7 +216,7 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-    torch.set_default_device(device)
+    torch.set_default_device(device)  # TODO: remove default_device
 
     # env setup
     envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, 0, args.capture_video, run_name)])
@@ -325,6 +325,10 @@ if __name__ == "__main__":
     def extend_and_sample(transition):
         rb.extend(transition)
         return rb.sample(args.batch_size)
+    
+    def policy(obs):
+        with torch.no_grad():
+            return actor(obs)[0]
 
     is_extend_compiled = False
     if args.compile:
@@ -332,13 +336,13 @@ if __name__ == "__main__":
         update_qnets = torch.compile(update_qnets, mode=mode)
         update_policy = torch.compile(update_policy, mode=mode)
         update_params = torch.compile(update_params, mode=mode)
-        # policy = torch.compile(policy, mode=mode)
+        policy = torch.compile(policy)
 
     if args.cudagraphs:
         update_qnets = CudaGraphModule(update_qnets, in_keys=[], out_keys=[])
         update_policy = CudaGraphModule(update_policy, in_keys=[], out_keys=[])
         update_params = CudaGraphModule(update_params, in_keys=[], out_keys=[])
-        # policy = CudaGraphModule(policy, in_keys=[], out_keys=[])
+        policy = CudaGraphModule(policy)
 
     # TRY NOT TO MODIFY: start the game
     obs, _ = envs.reset(seed=args.seed)
@@ -358,9 +362,7 @@ if __name__ == "__main__":
         if global_step < args.learning_starts:
             actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
         else:
-            with torch.no_grad():
-                actions = actor(obs)[0]
-            actions = actions.cpu().numpy()
+            actions = policy(obs).cpu().numpy()
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
