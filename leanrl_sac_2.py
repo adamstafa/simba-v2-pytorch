@@ -123,8 +123,8 @@ class SoftQNetwork(nn.Module):
             max_v=5.0)
 
     def forward(self, x, a):
-        q, info = self.critic(x, a)
-        return q, info['log_prob']
+        # return q, log_prob
+        return self.critic(x, a)
     
     def normalize_weights(self):
         self.critic.normalize_weights()

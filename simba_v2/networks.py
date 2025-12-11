@@ -132,10 +132,9 @@ class SimbaV2Critic(nn.Module):
 
     def forward(self, observations: torch.tensor, actions: torch.tensor) -> tuple[torch.tensor, dict]:
         x = torch.concatenate((observations, actions), dim=-1)
-        y = self.embedder(x)
-        z = self.encoder(y)
-        q, info = self.predictor(z)
-        return q, info
+        x = self.embedder(x)
+        x = self.encoder(x)
+        return self.predictor(x)
     
     def normalize_weights(self):
         self.embedder.normalize_weights()

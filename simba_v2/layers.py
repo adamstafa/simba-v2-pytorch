@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 def l2normalize(x: torch.tensor, dim: int, eps: float = 1e-8) -> torch.tensor:
@@ -90,14 +91,11 @@ class HyperEmbedder(nn.Module):
                              self.scaler_scale)
 
     def forward(self, x: torch.tensor) -> torch.tensor:
-        # TODO: maybe pass the device in the constructor?
-        new_axis = torch.ones((x.shape[:-1] + (1,)), device=x.device) * self.c_shift
-        x = torch.concatenate([x, new_axis], axis=-1)
+        x = F.pad(x, (0, 1), value=self.c_shift) # appends c_shift to last_dim
         x = l2normalize(x, dim=-1)
         x = self.w(x)
         x = self.scaler(x)
         x = l2normalize(x, dim=-1)
-
         return x
 
     def normalize_weights(self):
@@ -221,8 +219,7 @@ class HyperCategoricalValue(nn.Module):
         log_prob = self.log_softmax(value)
         value = torch.sum(torch.exp(log_prob) * self.bin_values, dim=-1)
 
-        info = {"log_prob": log_prob}
-        return value, info
+        return value, log_prob
     
     def normalize_weights(self):
         self.w1.normalize_weights()
