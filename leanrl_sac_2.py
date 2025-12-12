@@ -227,16 +227,15 @@ if __name__ == "__main__":
     actor = Actor(envs, n_act=n_act, n_obs=n_obs)
     qf1 = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf2 = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
+    actor.normalize_weights()
+    qf1.normalize_weights()
+    qf2.normalize_weights()
     qf1_target = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf2_target = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr, capturable=args.cudagraphs and not args.compile)
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr, capturable=args.cudagraphs and not args.compile)
-
-    actor.normalize_weights()
-    qf1.normalize_weights()
-    qf2.normalize_weights()
 
     # Automatic entropy tuning
     if args.autotune:
@@ -332,11 +331,11 @@ if __name__ == "__main__":
 
     is_extend_compiled = False
     if args.compile:
-        mode = None  # "reduce-overhead" if not args.cudagraphs else None
+        mode = None
         update_qnets = torch.compile(update_qnets, mode=mode)
         update_policy = torch.compile(update_policy, mode=mode)
         update_params = torch.compile(update_params, mode=mode)
-        policy = torch.compile(policy)
+        policy = torch.compile(policy, mode=mode)
 
     if args.cudagraphs:
         update_qnets = CudaGraphModule(update_qnets, in_keys=[], out_keys=[])
