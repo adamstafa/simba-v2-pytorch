@@ -217,6 +217,8 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
     torch.set_default_device(device)  # TODO: remove default_device
+    # optional speedup:
+    # torch.set_float32_matmul_precision("high")
 
     # env setup
     envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, 0, args.capture_video, run_name)])
