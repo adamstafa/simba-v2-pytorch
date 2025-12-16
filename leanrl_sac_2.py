@@ -125,8 +125,6 @@ class SoftQNetwork(nn.Module):
     def normalize_weights(self):
         self.critic.normalize_weights()
 
-LOG_STD_MAX = 2
-LOG_STD_MIN = -5
 
 REWARD_SCALE = 0.0025
 
