@@ -61,10 +61,6 @@ class Args:
     """the learning rate of the policy network optimizer"""
     q_lr: float = 1e-4
     """the learning rate of the Q network network optimizer"""
-    policy_frequency: int = 1
-    """the frequency of training policy (delayed)"""
-    target_network_frequency: int = 1  # Denis Yarats' implementation delays this by 2.
-    """the frequency of updates for the target nerworks"""
     alpha: float = 0.2
     """Entropy regularization coefficient."""
     autotune: bool = False
