@@ -47,6 +47,8 @@ class Args:
     """the environment id of the task"""
     total_timesteps: int = 1000000
     """total timesteps of the experiments"""
+    num_envs: int = 1
+    """the number of parallel game environments"""
     buffer_size: int = int(1e6)
     """the replay memory buffer size"""
     gamma: float = 0.99
@@ -215,7 +217,7 @@ if __name__ == "__main__":
     # torch.set_float32_matmul_precision("high")
 
     # env setup
-    envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, 0, args.capture_video, run_name)])
+    envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, i, args.capture_video and i == 0, run_name) for i in range(args.num_envs)])
     n_act = math.prod(envs.single_action_space.shape)
     n_obs = math.prod(envs.single_observation_space.shape)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
@@ -366,9 +368,10 @@ if __name__ == "__main__":
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if "final_info" in infos:
             for info in infos["final_info"]:
-                r = float(info["episode"]["r"])
-                max_ep_ret = max(max_ep_ret, r)
-                avg_returns.append(r)
+                if info is not None:
+                    r = float(info["episode"]["r"])
+                    max_ep_ret = max(max_ep_ret, r)
+                    avg_returns.append(r)
             desc = (
                 f"global_step={global_step}, episodic_return={torch.tensor(avg_returns).mean(): 4.2f} (max={max_ep_ret: 4.2f})"
             )
