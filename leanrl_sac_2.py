@@ -302,8 +302,9 @@ if __name__ == "__main__":
             alpha_loss.backward()
             a_optimizer.step()
 
+        actor_entropy = -log_pi.mean()
         alpha_loss = torch.tensor(0)
-        return TensorDict(alpha=alpha.detach(), actor_loss=actor_loss.detach(), alpha_loss=alpha_loss.detach())
+        return TensorDict(alpha=alpha.detach(), actor_loss=actor_loss.detach(), alpha_loss=alpha_loss.detach(), actor_entropy=actor_entropy.detach())
     
     def update_params(data):
         with torch.no_grad():
@@ -419,6 +420,7 @@ if __name__ == "__main__":
                         "monitoring/q_max": out["qvals"].max(),
                         "episode_return": torch.tensor(avg_returns).mean(),
                         "speed": speed,
+                        "actor_entropy": out["actor_entropy"],
                     },
                     step=global_step,
                 )
