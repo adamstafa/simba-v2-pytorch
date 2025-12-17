@@ -128,9 +128,6 @@ class SoftQNetwork(nn.Module):
         self.critic.normalize_weights()
 
 
-REWARD_SCALE = 0.0025
-
-
 class Actor(nn.Module):
     def __init__(self, envs, n_act, n_obs):
         super().__init__()
@@ -182,6 +179,52 @@ class Actor(nn.Module):
     
     def normalize_weights(self):
         self.actor.normalize_weights()
+
+
+class RewardNormalizer(nn.Module):
+    def __init__(self, gamma, max_v, num_envs):
+        super().__init__()
+        self.eps = 1e-2
+        self.gamma = gamma
+        self.max_v = max_v
+        self.num_envs = num_envs
+        self.discounts = torch.ones(num_envs)
+        self.ep_returns = torch.zeros(num_envs)
+        self.max_return = torch.zeros(num_envs) + self.eps
+
+        self.mean = torch.tensor([0.0])
+        self.m2 = torch.tensor([0.0])  # Second moment (sum of squares)
+        self.count = torch.tensor([0])
+
+        self.reward_scale = torch.tensor([1.0])
+
+    @torch.no_grad()
+    def update(self, rewards, dones):
+        # Correct but doesn't work
+        # self.ep_returns += rewards * self.discounts
+        # self.discounts *= self.gamma
+
+        # Incorrect but works
+        self.ep_returns = self.ep_returns * self.gamma + rewards
+
+        # TODO: try updating only at the end of episode
+        self.count += self.num_envs
+        self.mean += (self.ep_returns.sum() - self.mean) / self.count
+        self.m2 += (self.ep_returns.square().sum() - self.m2) / self.count
+
+        var = self.m2 - self.mean.square()
+        self.max_return = torch.max(self.max_return, self.ep_returns.abs().max())
+
+        self.discounts[dones] = 1.0
+        self.ep_returns[dones] = 0.0
+
+        self.reward_scale.copy_(1 / torch.max(
+            torch.sqrt(var + self.eps),
+            self.max_return / self.max_v))
+
+    def forward(self, rewards):
+        return rewards * self.reward_scale
+
 
 def grad_norm(optimizer):
     total = 0.0
@@ -235,6 +278,8 @@ if __name__ == "__main__":
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr, capturable=args.cudagraphs and not args.compile)
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr, capturable=args.cudagraphs and not args.compile)
 
+    reward_normalizer = RewardNormalizer(args.gamma, 5.0, args.num_envs)
+
     # Automatic entropy tuning
     if args.autotune:
         target_entropy = -torch.prod(torch.Tensor(envs.single_action_space.shape).to(device)).item()
@@ -242,7 +287,7 @@ if __name__ == "__main__":
         alpha = log_alpha.detach().exp()
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr, capturable=args.cudagraphs and not args.compile)
     else:
-        alpha = torch.as_tensor(args.alpha, device=device) * REWARD_SCALE
+        alpha = torch.as_tensor(args.alpha, device=device)
 
     envs.single_observation_space.dtype = np.float32
     rb = ReplayBuffer(storage=LazyTensorStorage(args.buffer_size, device=device))
@@ -253,6 +298,7 @@ if __name__ == "__main__":
             actions = data["actions"]
             next_observations = data["next_observations"]
             rewards = data["rewards"].flatten()
+            rewards = reward_normalizer(rewards)
             dones = data["dones"].flatten()
 
             next_state_actions, next_state_log_pi, _ = actor.get_action(next_observations)
@@ -364,7 +410,8 @@ if __name__ == "__main__":
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
-        rewards *= REWARD_SCALE
+
+        reward_normalizer.update(torch.as_tensor(rewards), torch.as_tensor(terminations | truncations))
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if "final_info" in infos:
@@ -398,6 +445,9 @@ if __name__ == "__main__":
         obs = next_obs
         data = extend_and_sample(transition)
 
+        # TODO: maybe refactor
+        alpha = reward_normalizer(args.alpha)
+
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
             out = update_qnets(data)
@@ -421,6 +471,7 @@ if __name__ == "__main__":
                         "episode_return": torch.tensor(avg_returns).mean(),
                         "speed": speed,
                         "actor_entropy": out["actor_entropy"],
+                        "reward_scale": reward_normalizer(1.0),
                     },
                     step=global_step,
                 )
