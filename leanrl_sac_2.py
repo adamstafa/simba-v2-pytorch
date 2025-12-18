@@ -199,17 +199,17 @@ class RewardNormalizer(nn.Module):
 
     @torch.no_grad()
     def update(self, rewards, dones):
-        # Correct but doesn't work
-        # self.ep_returns += rewards * self.discounts
-        # self.discounts *= self.gamma
+        self.ep_returns += rewards * self.discounts
+        self.discounts *= self.gamma
 
-        # Incorrect but works
-        self.ep_returns = self.ep_returns * self.gamma + rewards
+        # Original implementation
+        # self.ep_returns = self.ep_returns * self.gamma + rewards
 
-        # TODO: try updating only at the end of episode
-        self.count += self.num_envs
-        self.mean += (self.ep_returns.sum() - self.mean) / self.count
-        self.m2 += (self.ep_returns.square().sum() - self.m2) / self.count
+        # TODO: fix batch update
+        if dones.any():
+            self.count += self.num_envs
+            self.mean += (self.ep_returns.sum() - self.mean) / self.count
+            self.m2 += (self.ep_returns.square().sum() - self.m2) / self.count
 
         var = self.m2 - self.mean.square()
         self.max_return = torch.max(self.max_return, self.ep_returns.abs().max())
@@ -277,7 +277,7 @@ if __name__ == "__main__":
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr, capturable=args.cudagraphs and not args.compile)
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr, capturable=args.cudagraphs and not args.compile)
 
-    reward_normalizer = RewardNormalizer(args.gamma, 5.0, args.num_envs)
+    reward_normalizer = RewardNormalizer(args.gamma, 3.0, args.num_envs)
 
     # Automatic entropy tuning
     if args.autotune:
@@ -297,7 +297,6 @@ if __name__ == "__main__":
             actions = data["actions"]
             next_observations = data["next_observations"]
             rewards = data["rewards"].flatten()
-            rewards = reward_normalizer(rewards)
             dones = data["dones"].flatten()
 
             next_state_actions, next_state_log_pi, _ = actor.get_action(next_observations)
@@ -367,7 +366,10 @@ if __name__ == "__main__":
 
     def extend_and_sample(transition):
         rb.extend(transition)
-        return rb.sample(args.batch_size)
+        batch = rb.sample(args.batch_size)
+        batch["rewards"] = reward_normalizer(batch["rewards"])
+        return batch
+
     
     def policy(obs):
         with torch.no_grad():
