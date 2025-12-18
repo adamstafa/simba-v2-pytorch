@@ -180,6 +180,37 @@ class Actor(nn.Module):
         self.actor.normalize_weights()
 
 
+# TODO: fix batch update
+class Normalizer(nn.Module):
+    def __init__(self, shape):
+        super().__init__()
+
+        self.mean = torch.zeros(shape, dtype=torch.float32)
+        self.m2 = torch.zeros(shape, dtype=torch.float32)  # Second moment (sum of squares)
+        self.std = torch.zeros(shape, dtype=torch.float32)
+        self.count = torch.tensor(0.0)
+
+    # TODO: fix performance
+    @torch.no_grad()
+    def update(self, x):
+        self.count += 1
+        self.m2 += (x.square() - self.m2) / self.count
+        self.mean.copy_(self.mean + (x - self.mean) / self.count)
+        self.std.copy_(torch.sqrt(self.m2 - self.mean.square() + 1e-8))
+
+
+class ObservationNormalizer(nn.Module):
+    def __init__(self, shape):
+        super().__init__()
+        self.rms = Normalizer(shape)
+
+    def update(self, obs):
+        self.rms.update(obs)
+
+    def forward(self, obs):
+        return (obs - self.rms.mean) / self.rms.std
+
+
 class RewardNormalizer(nn.Module):
     def __init__(self, gamma, max_v, num_envs):
         super().__init__()
@@ -278,6 +309,7 @@ if __name__ == "__main__":
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr, capturable=args.cudagraphs and not args.compile)
 
     reward_normalizer = RewardNormalizer(args.gamma, 3.0, args.num_envs)
+    observation_normalizer = ObservationNormalizer(envs.observation_space.shape)
 
     # Automatic entropy tuning
     if args.autotune:
@@ -367,12 +399,15 @@ if __name__ == "__main__":
     def extend_and_sample(transition):
         rb.extend(transition)
         batch = rb.sample(args.batch_size)
+        batch["observations"] = observation_normalizer(batch["observations"])
+        batch["next_observations"] = observation_normalizer(batch["next_observations"])
         batch["rewards"] = reward_normalizer(batch["rewards"])
         return batch
 
     
     def policy(obs):
         with torch.no_grad():
+            obs = observation_normalizer(obs)
             return actor(obs)[0]
 
     is_extend_compiled = False
@@ -413,6 +448,7 @@ if __name__ == "__main__":
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
 
         reward_normalizer.update(torch.as_tensor(rewards), torch.as_tensor(terminations | truncations))
+        observation_normalizer.update(torch.as_tensor(next_obs))
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if "final_info" in infos:
