@@ -185,10 +185,10 @@ class Normalizer(nn.Module):
     def __init__(self, shape):
         super().__init__()
 
-        self.mean = torch.zeros(shape, dtype=torch.float32)
-        self.m2 = torch.zeros(shape, dtype=torch.float32)  # Second moment (sum of squares)
-        self.std = torch.zeros(shape, dtype=torch.float32)
-        self.count = torch.tensor(0.0)
+        self.register_buffer("mean", torch.zeros(shape, dtype=torch.float32))
+        self.register_buffer("m2", torch.zeros(shape, dtype=torch.float32))  # Second moment (sum of squares)
+        self.register_buffer("std", torch.zeros(shape, dtype=torch.float32))
+        self.register_buffer("count", torch.tensor(0.0))
 
     # TODO: fix performance
     @torch.no_grad()
@@ -218,15 +218,15 @@ class RewardNormalizer(nn.Module):
         self.gamma = gamma
         self.max_v = max_v
         self.num_envs = num_envs
-        self.discounts = torch.ones(num_envs)
-        self.ep_returns = torch.zeros(num_envs)
-        self.max_return = torch.zeros(num_envs) + self.eps
+        self.register_buffer("discounts", torch.ones(num_envs))
+        self.register_buffer("ep_returns", torch.zeros(num_envs))
+        self.register_buffer("max_return", torch.zeros(num_envs) + self.eps)
 
-        self.mean = torch.tensor([0.0])
-        self.m2 = torch.tensor([0.0])  # Second moment (sum of squares)
-        self.count = torch.tensor([0])
+        self.register_buffer("mean", torch.tensor([0.0]))
+        self.register_buffer("m2", torch.tensor([0.0]))  # Second moment (sum of squares)
+        self.register_buffer("count", torch.tensor([0]))
 
-        self.reward_scale = torch.tensor([1.0])
+        self.register_buffer("reward_scale", torch.tensor([1.0]))
 
     @torch.no_grad()
     def update(self, rewards, dones):
@@ -285,7 +285,7 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-    torch.set_default_device(device)  # TODO: remove default_device
+
     # optional speedup:
     # torch.set_float32_matmul_precision("high")
 
@@ -295,7 +295,7 @@ if __name__ == "__main__":
     n_obs = math.prod(envs.single_observation_space.shape)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
-    actor = Actor(envs, n_act=n_act, n_obs=n_obs)
+    actor = Actor(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf1 = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf2 = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     actor.normalize_weights()
@@ -308,8 +308,8 @@ if __name__ == "__main__":
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr, capturable=args.cudagraphs and not args.compile)
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr, capturable=args.cudagraphs and not args.compile)
 
-    reward_normalizer = RewardNormalizer(args.gamma, 3.0, args.num_envs)
-    observation_normalizer = ObservationNormalizer(envs.observation_space.shape)
+    reward_normalizer = RewardNormalizer(args.gamma, 3.0, args.num_envs).to(device)
+    observation_normalizer = ObservationNormalizer(envs.observation_space.shape).to(device)
 
     # Automatic entropy tuning
     if args.autotune:
@@ -447,8 +447,6 @@ if __name__ == "__main__":
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
 
-        reward_normalizer.update(torch.as_tensor(rewards), torch.as_tensor(terminations | truncations))
-        observation_normalizer.update(torch.as_tensor(next_obs))
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if "final_info" in infos:
@@ -460,6 +458,8 @@ if __name__ == "__main__":
             desc = (
                 f"global_step={global_step}, episodic_return={torch.tensor(avg_returns).mean(): 4.2f} (max={max_ep_ret: 4.2f})"
             )
+        
+        # TODO: maybe handle truncations differently
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
         next_obs = torch.as_tensor(next_obs, device=device, dtype=torch.float)
@@ -472,11 +472,15 @@ if __name__ == "__main__":
             next_observations=real_next_obs,
             actions=torch.as_tensor(actions, device=device, dtype=torch.float),
             rewards=torch.as_tensor(rewards, device=device, dtype=torch.float),
-            terminations=terminations,
+            truncations=truncations,
             dones=terminations,
             batch_size=obs.shape[0],
             device=device,
         )
+
+        # TODO: move to extend_and_sample
+        reward_normalizer.update(transition["rewards"], transition["truncations"] | transition["dones"])
+        observation_normalizer.update(transition["observations"])
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs

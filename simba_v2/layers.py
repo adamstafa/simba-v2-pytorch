@@ -206,9 +206,9 @@ class HyperCategoricalValue(nn.Module):
         self.scaler = Scaler(self.hidden_dim, self.scaler_init, self.scaler_scale)
         self.w2 = HyperDense(self.hidden_dim, self.num_bins)
         self.bias = nn.Parameter(torch.zeros(self.num_bins))
-        self.bin_values = torch.linspace(
+        self.register_buffer("bin_values", torch.linspace(
             start=self.min_v, end=self.max_v, steps=self.num_bins
-        ).reshape(1, -1)
+        ).reshape(1, -1))
         self.log_softmax = nn.LogSoftmax(dim=-1)
 
     def forward(self, x: torch.tensor) -> torch.tensor:
