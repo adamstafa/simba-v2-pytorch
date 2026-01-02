@@ -462,8 +462,6 @@ if __name__ == "__main__":
             desc = (
                 f"global_step={global_step}, episodic_return={torch.tensor(avg_returns).mean(): 4.2f} (max={max_ep_ret: 4.2f})"
             )
-        
-        # TODO: maybe handle truncations differently
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
         next_obs = torch.as_tensor(next_obs, device=device, dtype=torch.float)
