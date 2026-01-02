@@ -210,6 +210,8 @@ class ObservationNormalizer(nn.Module):
     def forward(self, obs):
         return (obs - self.rms.mean) / self.rms.std
 
+    def apply_(self, obs):
+        obs.sub_(self.rms.mean).div_(self.rms.std)
 
 class RewardNormalizer(nn.Module):
     def __init__(self, gamma, max_v, num_envs):
@@ -221,35 +223,22 @@ class RewardNormalizer(nn.Module):
         self.register_buffer("discounts", torch.ones(num_envs))
         self.register_buffer("ep_returns", torch.zeros(num_envs))
         self.register_buffer("max_return", torch.zeros(num_envs) + self.eps)
-
-        self.register_buffer("mean", torch.tensor([0.0]))
-        self.register_buffer("m2", torch.tensor([0.0]))  # Second moment (sum of squares)
-        self.register_buffer("count", torch.tensor([0]))
-
         self.register_buffer("reward_scale", torch.tensor([1.0]))
 
     @torch.no_grad()
     def update(self, rewards, dones):
         self.ep_returns += rewards * self.discounts
         self.discounts *= self.gamma
-
-        # # TODO: fix batch update (Welford's algorithm)
-        self.count.copy_(self.count + dones.sum())
-        self.mean.copy_(self.mean + ((dones * self.ep_returns).sum() - self.mean) / self.count.clamp_min(1))
-        self.m2.copy_(self.m2 + ((dones * self.ep_returns).square().sum() - self.m2) / self.count.clamp_min(1))
-        var = self.m2 - self.mean.square()
         self.max_return.copy_(torch.max(self.max_return, self.ep_returns.abs().max()))
-
+        self.reward_scale.copy_(self.max_v / self.max_return.clamp_min(self.eps))
         self.discounts[dones] = 1.0
         self.ep_returns[dones] = 0.0
-
-        self.reward_scale.copy_(1 / torch.max(
-            torch.sqrt(var + self.eps),
-            self.max_return / self.max_v))
 
     def forward(self, rewards):
         return rewards * self.reward_scale
 
+    def apply_(self, rewards):
+        rewards.mul_(self.reward_scale)
 
 def grad_norm(optimizer):
     total = 0.0
@@ -393,12 +382,13 @@ if __name__ == "__main__":
     
 
     def extend_and_sample(transition):
-        rb.extend(transition)
-        batch = rb.sample(args.batch_size)
-        batch["observations"] = observation_normalizer(batch["observations"])
-        batch["next_observations"] = observation_normalizer(batch["next_observations"])
-        batch["rewards"] = reward_normalizer(batch["rewards"])
-        return batch
+        with torch.no_grad():
+            rb.extend(transition)
+            batch = rb.sample(args.batch_size)
+            observation_normalizer.apply_(batch["observations"])
+            observation_normalizer.apply_(batch["next_observations"])
+            reward_normalizer.apply_(batch["rewards"])
+            return batch
 
     
     def policy(obs):
@@ -507,7 +497,7 @@ if __name__ == "__main__":
                         "episode_return": torch.tensor(avg_returns).mean(),
                         "speed": speed,
                         "actor_entropy": out["actor_entropy"],
-                        "reward_scale": reward_normalizer(1.0),
+                        "reward_scale": reward_normalizer.reward_scale,
                     },
                     step=global_step,
                 )
