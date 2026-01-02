@@ -355,7 +355,9 @@ if __name__ == "__main__":
 
         if args.autotune:
             with torch.no_grad():
-                _, log_pi, _ = actor.get_action(data["observations"]) # TODO: already evaluated, use computed result
+                _, log_pi, _ = actor.get_action(data["observations"])
+            # TODO: consider reusing already computed log_pi
+            # log_pi = log_pi.detach()
             alpha_loss = (-log_alpha.exp() * (log_pi + target_entropy)).mean()
             a_optimizer.zero_grad()
             alpha_loss.backward()
