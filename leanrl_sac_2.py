@@ -305,7 +305,7 @@ if __name__ == "__main__":
 
 
     # TODO: we're adding the entropy bonus, episodic return doesn't necessarily approximate the Q-values
-    best_return_scale = 1.5
+    best_return_scale = 3.0
     reward_normalizer = RewardNormalizer(args.gamma, best_return_scale, args.num_envs).to(device)
     observation_normalizer = ObservationNormalizer(envs.observation_space.shape).to(device)
 
