@@ -233,17 +233,12 @@ class RewardNormalizer(nn.Module):
         self.ep_returns += rewards * self.discounts
         self.discounts *= self.gamma
 
-        # Original implementation
-        # self.ep_returns = self.ep_returns * self.gamma + rewards
-
-        # TODO: fix batch update
-        if dones.any():
-            self.count += self.num_envs
-            self.mean += (self.ep_returns.sum() - self.mean) / self.count
-            self.m2 += (self.ep_returns.square().sum() - self.m2) / self.count
-
+        # # TODO: fix batch update (Welford's algorithm)
+        self.count.copy_(self.count + dones.sum())
+        self.mean.copy_(self.mean + ((dones * self.ep_returns).sum() - self.mean) / self.count.clamp_min(1))
+        self.m2.copy_(self.m2 + ((dones * self.ep_returns).square().sum() - self.m2) / self.count.clamp_min(1))
         var = self.m2 - self.mean.square()
-        self.max_return = torch.max(self.max_return, self.ep_returns.abs().max())
+        self.max_return.copy_(torch.max(self.max_return, self.ep_returns.abs().max()))
 
         self.discounts[dones] = 1.0
         self.ep_returns[dones] = 0.0
@@ -308,7 +303,10 @@ if __name__ == "__main__":
     q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr, capturable=args.cudagraphs and not args.compile)
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr, capturable=args.cudagraphs and not args.compile)
 
-    reward_normalizer = RewardNormalizer(args.gamma, 3.0, args.num_envs).to(device)
+
+    # TODO: we're adding the entropy bonus, episodic return doesn't necessarily approximate the Q-values
+    best_return_scale = 1.5
+    reward_normalizer = RewardNormalizer(args.gamma, best_return_scale, args.num_envs).to(device)
     observation_normalizer = ObservationNormalizer(envs.observation_space.shape).to(device)
 
     # Automatic entropy tuning
@@ -410,18 +408,24 @@ if __name__ == "__main__":
             obs = observation_normalizer(obs)
             return actor(obs)[0]
 
+    def update_normalizers(transition):
+        reward_normalizer.update(transition["rewards"], transition["truncations"] | transition["dones"])
+        observation_normalizer.update(transition["observations"])
+
     is_extend_compiled = False
     if args.compile:
         mode = None
         update_qnets = torch.compile(update_qnets, mode=mode)
         update_policy = torch.compile(update_policy, mode=mode)
         update_params = torch.compile(update_params, mode=mode)
+        update_normalizers = torch.compile(update_normalizers, mode=mode)
         policy = torch.compile(policy, mode=mode)
 
     if args.cudagraphs:
         update_qnets = CudaGraphModule(update_qnets, in_keys=[], out_keys=[])
         update_policy = CudaGraphModule(update_policy, in_keys=[], out_keys=[])
         update_params = CudaGraphModule(update_params, in_keys=[], out_keys=[])
+        update_normalizers = CudaGraphModule(update_normalizers, in_keys=[], out_keys=[])
         policy = CudaGraphModule(policy)
 
     # TRY NOT TO MODIFY: start the game
@@ -478,9 +482,7 @@ if __name__ == "__main__":
             device=device,
         )
 
-        # TODO: move to extend_and_sample
-        reward_normalizer.update(transition["rewards"], transition["truncations"] | transition["dones"])
-        observation_normalizer.update(transition["observations"])
+        update_normalizers(transition)
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs
