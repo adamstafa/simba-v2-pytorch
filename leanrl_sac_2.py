@@ -65,7 +65,7 @@ class Args:
     """the learning rate of the Q network network optimizer"""
     alpha: float = 0.2
     """Entropy regularization coefficient."""
-    autotune: bool = False
+    autotune: bool = True
     """automatic tuning of the entropy coefficient"""
 
     compile: bool = True
@@ -312,11 +312,12 @@ if __name__ == "__main__":
     # Automatic entropy tuning
     if args.autotune:
         target_entropy = -torch.prod(torch.Tensor(envs.single_action_space.shape).to(device)).item()
-        log_alpha = torch.zeros(1, requires_grad=True, device=device)
+        log_alpha = torch.tensor(math.log(args.alpha), requires_grad=True, device=device)  # Use args.alpha as initial value
         alpha = log_alpha.detach().exp()
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr, capturable=args.cudagraphs and not args.compile)
     else:
         alpha = torch.as_tensor(args.alpha, device=device)
+    normalized_alpha = reward_normalizer(alpha)  # alpha needs to be scaled the same way as rewards
 
     envs.single_observation_space.dtype = np.float32
     rb = ReplayBuffer(storage=LazyTensorStorage(args.buffer_size, device=device))
@@ -336,58 +337,55 @@ if __name__ == "__main__":
             qf_log_prob_stack = torch.stack([qf1_target_log_prob, qf2_target_log_prob], dim=0)
             min_idx = torch.argmin(qf_stack, dim=0)
             target_log_probs = qf_log_prob_stack[min_idx, torch.arange(qf_log_prob_stack.shape[1])]
-            min_qf_next_target = qf_stack[min_idx, torch.arange(qf_stack.shape[1])] - alpha * next_state_log_pi
-            next_q_value = rewards + (~ dones) * args.gamma * (min_qf_next_target)
 
         qf1_a_values, qf1_log_probs = qf1(observations, actions)
         qf2_a_values, qf2_log_probs = qf2(observations, actions)
 
-        # MSE loss
-        # qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-        # qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
-
         # Distributional loss
-        qf1_loss = categorical_td_loss(qf1_log_probs, target_log_probs, rewards, dones, next_state_log_pi, alpha, args.gamma, 101, -5.0, 5.0)
-        qf2_loss = categorical_td_loss(qf2_log_probs, target_log_probs, rewards, dones, next_state_log_pi, alpha, args.gamma, 101, -5.0, 5.0)
+        qf1_loss = categorical_td_loss(qf1_log_probs, target_log_probs, rewards, dones, next_state_log_pi, normalized_alpha, args.gamma, 101, -5.0, 5.0)
+        qf2_loss = categorical_td_loss(qf2_log_probs, target_log_probs, rewards, dones, next_state_log_pi, normalized_alpha, args.gamma, 101, -5.0, 5.0)
         qf_loss = qf1_loss + qf2_loss
 
         q_optimizer.zero_grad()
         qf_loss.backward()
         q_optimizer.step()
-        return TensorDict(qf_loss=qf_loss.detach(), qvals=qf1_a_values.detach())
+
+        q_vals = torch.min(qf1_a_values, qf2_a_values)
+        return TensorDict(qf_loss=qf_loss.detach(), qvals=q_vals.detach())
 
     def update_policy(data):
         pi, log_pi, _ = actor.get_action(data["observations"])
         qf1_pi, _ = qf1(data["observations"], pi)
         qf2_pi, _ = qf2(data["observations"], pi)
         min_qf_pi = torch.min(qf1_pi, qf2_pi)
-        actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
+        actor_loss = ((normalized_alpha * log_pi) - min_qf_pi).mean()
 
         actor_optimizer.zero_grad()
         actor_loss.backward()
         actor_optimizer.step()
 
         if args.autotune:
-            a_optimizer.zero_grad()
             with torch.no_grad():
                 _, log_pi, _ = actor.get_action(data["observations"]) # TODO: already evaluated, use computed result
             alpha_loss = (-log_alpha.exp() * (log_pi + target_entropy)).mean()
-
+            a_optimizer.zero_grad()
             alpha_loss.backward()
             a_optimizer.step()
-
+            alpha.copy_(log_alpha.exp())
+        else:
+            alpha_loss = torch.tensor(0)
+        normalized_alpha.copy_(reward_normalizer(alpha).detach())
+        
         actor_entropy = -log_pi.mean()
-        alpha_loss = torch.tensor(0)
         return TensorDict(alpha=alpha.detach(), actor_loss=actor_loss.detach(), alpha_loss=alpha_loss.detach(), actor_entropy=actor_entropy.detach())
     
     def update_params(data):
         with torch.no_grad():
             # Normalize weights
-            # TODO: evaluate the effect of weight normalization
             qf1.normalize_weights()
             qf2.normalize_weights()
             actor.normalize_weights()
-            # update the target networks
+            # Update the target networks
             for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
                 target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
             for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
@@ -485,9 +483,6 @@ if __name__ == "__main__":
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs
         data = extend_and_sample(transition)
-
-        # TODO: maybe refactor
-        alpha = reward_normalizer(args.alpha)
 
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
