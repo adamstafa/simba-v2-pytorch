@@ -357,7 +357,7 @@ if __name__ == "__main__":
         actor_entropy = -log_pi.mean()
         return TensorDict(alpha=alpha.detach(), actor_loss=actor_loss.detach(), alpha_loss=alpha_loss.detach(), actor_entropy=actor_entropy.detach())
     
-    def update_params(data):
+    def update_params():
         with torch.no_grad():
             qf1.normalize_weights()
             qf2.normalize_weights()
@@ -391,15 +391,15 @@ if __name__ == "__main__":
         mode = None
         update_qnets = torch.compile(update_qnets, mode=mode)
         update_policy = torch.compile(update_policy, mode=mode)
-        update_params = torch.compile(update_params, mode=mode)
         update_normalizers = torch.compile(update_normalizers, mode=mode)
+        update_params = torch.compile(update_params, mode=mode)
         policy = torch.compile(policy, mode=mode)
 
     if args.cudagraphs:
         update_qnets = CudaGraphModule(update_qnets, in_keys=[], out_keys=[])
         update_policy = CudaGraphModule(update_policy, in_keys=[], out_keys=[])
-        update_params = CudaGraphModule(update_params, in_keys=[], out_keys=[])
         update_normalizers = CudaGraphModule(update_normalizers, in_keys=[], out_keys=[])
+        update_params = CudaGraphModule(update_params)
         policy = CudaGraphModule(policy)
 
     # TRY NOT TO MODIFY: start the game
@@ -464,7 +464,7 @@ if __name__ == "__main__":
         if global_step > args.learning_starts:
             out = update_qnets(data)
             out.update(update_policy(data))
-            update_params(data)
+            update_params()
 
             if global_step % 100 == 0 and start_time is not None:
                 speed = (global_step - measure_burnin) / (time.time() - start_time)
