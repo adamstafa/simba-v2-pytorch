@@ -238,16 +238,6 @@ class RewardNormalizer(nn.Module):
     def apply_(self, rewards):
         rewards.mul_(self.reward_scale)
 
-def grad_norm(optimizer):
-    total = 0.0
-    for group in optimizer.param_groups:
-        for p in group["params"]:
-            if p.grad is None:
-                continue
-            param_norm = p.grad.data.norm(2)
-            total += param_norm.item() ** 2
-
-    return math.sqrt(total)
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
@@ -487,8 +477,6 @@ if __name__ == "__main__":
                         "losses/actor_loss": out["actor_loss"].mean(),
                         "losses/critic_loss": out["qf_loss"].mean(),
                         "losses/alpha_loss": out.get("alpha_loss", 0),
-                        "gradients/actor_norm": grad_norm(actor_optimizer),
-                        "gradients/critic_norm": grad_norm(q_optimizer),
                         "monitoring/alpha": alpha,
                         "monitoring/q_mean": out["qvals"].mean(),
                         "monitoring/q_min": out["qvals"].min(),
