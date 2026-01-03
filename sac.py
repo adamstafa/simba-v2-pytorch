@@ -19,10 +19,9 @@ import torch.optim as optim
 import tqdm
 import tyro
 import wandb
-from tensordict import TensorDict, from_module, from_modules
-from tensordict.nn import CudaGraphModule, TensorDictModule
+from tensordict import TensorDict
+from tensordict.nn import CudaGraphModule
 
-# from stable_baselines3.common.buffers import ReplayBuffer
 from torchrl.data import LazyTensorStorage, ReplayBuffer
 
 from simba_v2.networks import SimbaV2Actor, SimbaV2Critic
@@ -401,7 +400,6 @@ if __name__ == "__main__":
         reward_normalizer.update(transition["rewards"], transition["truncations"] | transition["dones"])
         observation_normalizer.update(transition["observations"])
 
-    is_extend_compiled = False
     if args.compile:
         mode = None
         update_qnets = torch.compile(update_qnets, mode=mode)
