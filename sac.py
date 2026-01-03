@@ -258,9 +258,6 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    # optional speedup:
-    # torch.set_float32_matmul_precision("high")
-
     # env setup
     envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, i, args.capture_video and i == 0, run_name) for i in range(args.num_envs)])
     n_act = math.prod(envs.single_action_space.shape)
