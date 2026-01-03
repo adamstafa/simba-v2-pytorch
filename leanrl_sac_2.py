@@ -180,22 +180,21 @@ class Actor(nn.Module):
         self.actor.normalize_weights()
 
 
-# TODO: fix batch update
 class Normalizer(nn.Module):
     def __init__(self, shape):
         super().__init__()
 
         self.register_buffer("mean", torch.zeros(shape, dtype=torch.float32))
-        self.register_buffer("m2", torch.zeros(shape, dtype=torch.float32))  # Second moment (sum of squares)
+        self.register_buffer("m2", torch.zeros(shape, dtype=torch.float32))  # Second moment
         self.register_buffer("std", torch.zeros(shape, dtype=torch.float32))
         self.register_buffer("count", torch.tensor(0.0))
 
-    # TODO: fix performance
     @torch.no_grad()
     def update(self, x):
-        self.count += 1
-        self.m2 += (x.square() - self.m2) / self.count
-        self.mean.copy_(self.mean + (x - self.mean) / self.count)
+        batch_size = x.shape[0]
+        self.count += batch_size
+        self.m2 += (x.square().sum(dim=0) - batch_size * self.m2) / self.count
+        self.mean.copy_(self.mean + (x.sum(dim=0) - batch_size * self.mean) / self.count)
         self.std.copy_(torch.sqrt(self.m2 - self.mean.square() + 1e-8))
 
 
@@ -222,8 +221,8 @@ class RewardNormalizer(nn.Module):
         self.num_envs = num_envs
         self.register_buffer("discounts", torch.ones(num_envs))
         self.register_buffer("ep_returns", torch.zeros(num_envs))
-        self.register_buffer("max_return", torch.zeros(num_envs) + self.eps)
-        self.register_buffer("reward_scale", torch.tensor([1.0]))
+        self.register_buffer("max_return", torch.tensor(0.0))
+        self.register_buffer("reward_scale", torch.tensor(1.0))
 
     @torch.no_grad()
     def update(self, rewards, dones):
@@ -296,7 +295,7 @@ if __name__ == "__main__":
     # TODO: we're adding the entropy bonus, episodic return doesn't necessarily approximate the Q-values
     best_return_scale = 3.0
     reward_normalizer = RewardNormalizer(args.gamma, best_return_scale, args.num_envs).to(device)
-    observation_normalizer = ObservationNormalizer(envs.observation_space.shape).to(device)
+    observation_normalizer = ObservationNormalizer(envs.single_observation_space.shape).to(device)
 
     # Automatic entropy tuning
     if args.autotune:
