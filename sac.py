@@ -318,7 +318,6 @@ if __name__ == "__main__":
         qf1_a_values, qf1_log_probs = qf1(observations, actions)
         qf2_a_values, qf2_log_probs = qf2(observations, actions)
 
-        # Distributional loss
         qf1_loss = categorical_td_loss(qf1_log_probs, target_log_probs, rewards, dones, next_state_log_pi, normalized_alpha, args.gamma, 101, -5.0, 5.0)
         qf2_loss = categorical_td_loss(qf2_log_probs, target_log_probs, rewards, dones, next_state_log_pi, normalized_alpha, args.gamma, 101, -5.0, 5.0)
         qf_loss = qf1_loss + qf2_loss
@@ -360,11 +359,9 @@ if __name__ == "__main__":
     
     def update_params(data):
         with torch.no_grad():
-            # Normalize weights
             qf1.normalize_weights()
             qf2.normalize_weights()
             actor.normalize_weights()
-            # Update the target networks
             for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
                 target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
             for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
