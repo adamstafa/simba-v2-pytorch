@@ -182,7 +182,7 @@ class Actor(nn.Module):
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{args.compile}__{args.cudagraphs}"
+    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}"
 
     wandb.init(
         project="sac_continuous_action",
