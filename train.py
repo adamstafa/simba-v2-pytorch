@@ -25,7 +25,6 @@ from tensordict.nn import CudaGraphModule
 from torchrl.data import LazyTensorStorage, ReplayBuffer
 
 from simba_v2.networks import SimbaV2Actor, SimbaV2Critic
-from simba_v2.update import categorical_td_loss
 from simba_v2.normalization import ObservationNormalizer, RewardNormalizer
 
 
