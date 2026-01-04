@@ -118,6 +118,7 @@ class SoftQNetwork(nn.Module):
             num_bins=101,
             min_v=-5.0,
             max_v=5.0)
+        self.normalize_weights()
 
     def forward(self, x, a):
         # return q, log_prob
@@ -142,6 +143,7 @@ class Actor(nn.Module):
         c_shift = 3.0
 
         self.actor = SimbaV2Actor(num_blocks=num_blocks, hidden_dim=hidden_dim, obs_dim=obs_dim, action_dim=action_dim,scaler_init=scaler_init, scaler_scale=scaler_scale, alpha_init=alpha_init, alpha_scale=alpha_scale, c_shift=c_shift)
+        self.normalize_weights()
 
         # action rescaling
         self.register_buffer(
@@ -208,9 +210,6 @@ if __name__ == "__main__":
     actor = Actor(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf1 = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf2 = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
-    actor.normalize_weights()
-    qf1.normalize_weights()
-    qf2.normalize_weights()
     qf1_target = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf2_target = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
