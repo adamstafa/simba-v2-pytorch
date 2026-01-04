@@ -104,6 +104,11 @@ class SoftQNetwork(nn.Module):
         alpha_init = 1 / (num_blocks + 1)
         alpha_scale = 1 / math.sqrt(hidden_dim)
         c_shift = 3.0
+        self.num_bins = 101
+        self.min_v = -5.0
+        self.max_v = 5.0
+        self.register_buffer("bin_values",
+            torch.linspace(start=self.min_v, end=self.max_v, steps=self.num_bins).unsqueeze(0))
         
         self.critic = SimbaV2Critic(
             num_blocks=num_blocks,
@@ -115,17 +120,31 @@ class SoftQNetwork(nn.Module):
             alpha_init=alpha_init,
             alpha_scale=alpha_scale,
             c_shift=c_shift,
-            num_bins=101,
-            min_v=-5.0,
-            max_v=5.0)
+            num_bins=self.num_bins,
+            min_v=self.min_v,
+            max_v=self.max_v)
         self.normalize_weights()
 
-    def forward(self, x, a):
-        # return q, log_prob
-        return self.critic(x, a)
-    
+    def forward(self, s, a):
+        # return q, log_probs
+        return self.critic(s, a)
+
     def normalize_weights(self):
         self.critic.normalize_weights()
+
+    def project_distribution(self, log_probs: torch.tensor, bin_values: torch.tensor) -> torch.tensor:
+        b = (bin_values - self.min_v) / ((self.max_v - self.min_v) / (self.num_bins - 1))
+        l = torch.floor(b).long()
+        l_mask = F.one_hot(l, self.num_bins)
+        u = torch.ceil(b).long()
+        u_mask = F.one_hot(u, self.num_bins)
+
+        _target_probs = torch.exp(log_probs)
+        m_l = (_target_probs * (u + (l == u) - b)).unsqueeze(-1)
+        m_u = (_target_probs * (b - l)).unsqueeze(-1)
+
+        target_probs = torch.sum(m_l * l_mask + m_u * u_mask, dim=1)
+        return target_probs
 
 
 class Actor(nn.Module):
@@ -142,7 +161,16 @@ class Actor(nn.Module):
         alpha_scale = 1 / math.sqrt(hidden_dim)
         c_shift = 3.0
 
-        self.actor = SimbaV2Actor(num_blocks=num_blocks, hidden_dim=hidden_dim, obs_dim=obs_dim, action_dim=action_dim,scaler_init=scaler_init, scaler_scale=scaler_scale, alpha_init=alpha_init, alpha_scale=alpha_scale, c_shift=c_shift)
+        self.actor = SimbaV2Actor(
+            num_blocks=num_blocks,
+            hidden_dim=hidden_dim,
+            obs_dim=obs_dim,
+            action_dim=action_dim,
+            scaler_init=scaler_init,
+            scaler_scale=scaler_scale,
+            alpha_init=alpha_init,
+            alpha_scale=alpha_scale,
+            c_shift=c_shift)
         self.normalize_weights()
 
         # action rescaling
@@ -250,8 +278,8 @@ if __name__ == "__main__":
             observations = data["observations"]
             actions = data["actions"]
             next_observations = data["next_observations"]
-            rewards = data["rewards"].flatten()
-            dones = data["dones"].flatten()
+            rewards = data["rewards"]
+            dones = data["dones"]
 
             next_state_actions, next_state_log_pi, _ = actor.get_action(next_observations)
             qf1_next_target, qf1_target_log_prob = qf1_target(next_observations, next_state_actions)
@@ -261,11 +289,18 @@ if __name__ == "__main__":
             min_idx = torch.argmin(qf_stack, dim=0)
             target_log_probs = qf_log_prob_stack[min_idx, torch.arange(qf_log_prob_stack.shape[1])]
 
+            # compute target distribution
+            next_state_values = qf1_target.bin_values - normalized_alpha * next_state_log_pi
+            target_bin_values = rewards.unsqueeze(1) + args.gamma * next_state_values * ~dones.unsqueeze(1)
+            target_bin_values.clip_(qf1_target.min_v, qf1_target.max_v)
+            target_probs = qf1_target.project_distribution(target_log_probs, target_bin_values)
+            
         qf1_a_values, qf1_log_probs = qf1(observations, actions)
         qf2_a_values, qf2_log_probs = qf2(observations, actions)
 
-        qf1_loss = categorical_td_loss(qf1_log_probs, target_log_probs, rewards, dones, next_state_log_pi, normalized_alpha, args.gamma, 101, -5.0, 5.0)
-        qf2_loss = categorical_td_loss(qf2_log_probs, target_log_probs, rewards, dones, next_state_log_pi, normalized_alpha, args.gamma, 101, -5.0, 5.0)
+        # cross-entropy loss
+        qf1_loss = -torch.mean(torch.sum(target_probs * qf1_log_probs, dim=1))
+        qf2_loss = -torch.mean(torch.sum(target_probs * qf2_log_probs, dim=1))
         qf_loss = qf1_loss + qf2_loss
 
         q_optimizer.zero_grad()
