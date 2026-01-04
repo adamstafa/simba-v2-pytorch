@@ -318,7 +318,8 @@ if __name__ == "__main__":
     def policy(obs):
         with torch.no_grad():
             obs = observation_normalizer(obs)
-            return actor(obs)[0]
+            action, _, _ = actor.get_action(obs)
+            return action
 
     @compile
     def update_normalizers(transition):
