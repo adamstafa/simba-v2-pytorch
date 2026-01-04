@@ -237,6 +237,15 @@ if __name__ == "__main__":
     envs.single_observation_space.dtype = np.float32
     rb = ReplayBuffer(storage=LazyTensorStorage(args.buffer_size, device=device))
 
+    # Decorator to apply torch.compile and CudaGraphModule
+    def compile(f):
+        if args.compile:
+            f = torch.compile(f)
+        if args.cudagraphs:
+            f = CudaGraphModule(f)
+        return f
+
+    @compile
     def update_qnets(data):
         with torch.no_grad():
             observations = data["observations"]
@@ -267,6 +276,7 @@ if __name__ == "__main__":
         q_vals = torch.min(qf1_a_values, qf2_a_values)
         return TensorDict(qf_loss=qf_loss.detach(), qvals=q_vals.detach())
 
+    @compile
     def update_policy(data):
         pi, log_pi, _ = actor.get_action(data["observations"])
         qf1_pi, _ = qf1(data["observations"], pi)
@@ -293,6 +303,7 @@ if __name__ == "__main__":
         actor_entropy = -log_pi.mean()
         return TensorDict(alpha=alpha.detach(), actor_loss=actor_loss.detach(), alpha_loss=alpha_loss.detach(), actor_entropy=actor_entropy.detach())
     
+    @compile
     def update_params():
         with torch.no_grad():
             qf1.normalize_weights()
@@ -301,8 +312,18 @@ if __name__ == "__main__":
             for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
                 target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
             for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
-                target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-    
+                target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)    
+
+    @compile
+    def policy(obs):
+        with torch.no_grad():
+            obs = observation_normalizer(obs)
+            return actor(obs)[0]
+
+    @compile
+    def update_normalizers(transition):
+        reward_normalizer.update(transition["rewards"], transition["truncations"] | transition["dones"])
+        observation_normalizer.update(transition["observations"])
 
     def extend_and_sample(transition):
         with torch.no_grad():
@@ -313,30 +334,6 @@ if __name__ == "__main__":
             reward_normalizer.apply_(batch["rewards"])
             return batch
 
-    
-    def policy(obs):
-        with torch.no_grad():
-            obs = observation_normalizer(obs)
-            return actor(obs)[0]
-
-    def update_normalizers(transition):
-        reward_normalizer.update(transition["rewards"], transition["truncations"] | transition["dones"])
-        observation_normalizer.update(transition["observations"])
-
-    if args.compile:
-        mode = None
-        update_qnets = torch.compile(update_qnets, mode=mode)
-        update_policy = torch.compile(update_policy, mode=mode)
-        update_normalizers = torch.compile(update_normalizers, mode=mode)
-        update_params = torch.compile(update_params, mode=mode)
-        policy = torch.compile(policy, mode=mode)
-
-    if args.cudagraphs:
-        update_qnets = CudaGraphModule(update_qnets, in_keys=[], out_keys=[])
-        update_policy = CudaGraphModule(update_policy, in_keys=[], out_keys=[])
-        update_normalizers = CudaGraphModule(update_normalizers, in_keys=[], out_keys=[])
-        update_params = CudaGraphModule(update_params)
-        policy = CudaGraphModule(policy)
 
     # TRY NOT TO MODIFY: start the game
     obs, _ = envs.reset(seed=args.seed)
