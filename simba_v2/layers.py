@@ -12,12 +12,8 @@ def l2normalize(x: torch.tensor, dim: int, eps: float = 1e-8) -> torch.tensor:
 class Scaler(nn.Module):
     def __init__(self, dim: int, init: float = 1.0, scale: float = 1.0):
         super().__init__()
-        self.dim = dim
-        self.init = init
-        self.scale = scale
-
-        self.scaler = nn.Parameter(torch.ones(dim) * self.scale)
-        self.forward_scaler = self.init / self.scale
+        self.scaler = nn.Parameter(torch.ones(dim) * scale)
+        self.forward_scaler = init / scale
 
     def forward(self, x: torch.tensor) -> torch.tensor:
         return self.scaler * self.forward_scaler * x
@@ -26,13 +22,7 @@ class Scaler(nn.Module):
 class HyperDense(nn.Module):
     def __init__(self, input_dim: int, output_dim: int):
         super().__init__()
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.linear = nn.Linear(
-            self.input_dim,
-            self.output_dim,
-            bias=False)
-
+        self.linear = nn.Linear(input_dim, output_dim, bias=False)
         nn.init.orthogonal_(self.linear.weight, gain=1.0)
 
     def forward(self, x: torch.tensor) -> torch.tensor:
@@ -49,18 +39,10 @@ class HyperMLP(nn.Module):
     def __init__(self, input_dim: int, output_dim: int, hidden_dim: int,
                  scaler_init: float, scaler_scale: float, eps: float = 1e-8):
         super().__init__()
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.hidden_dim = hidden_dim
-        self.scaler_init = scaler_init
-        self.scaler_scale = scaler_scale
-        self.eps = eps
-
-        self.w1 = HyperDense(self.input_dim, self.hidden_dim)
-        self.scaler = Scaler(self.hidden_dim,
-                             self.scaler_init,
-                             self.scaler_scale)
-        self.w2 = HyperDense(self.hidden_dim, self.output_dim)
+        self.register_buffer("eps", torch.tensor(eps))
+        self.w1 = HyperDense(input_dim, hidden_dim)
+        self.scaler = Scaler(hidden_dim, scaler_init, scaler_scale)
+        self.w2 = HyperDense(hidden_dim, output_dim)
 
     def forward(self, x: torch.tensor) -> torch.tensor:
         x = self.w1(x)
@@ -75,20 +57,11 @@ class HyperMLP(nn.Module):
         self.w2.normalize_weights()
 
 class HyperEmbedder(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int, scaler_init: float,
-                 scaler_scale: float, c_shift: float):
+    def __init__(self, input_dim: int, hidden_dim: int, scaler_init: float, scaler_scale: float, c_shift: float):
         super().__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.scaler_init = scaler_init
-        self.scaler_scale = scaler_scale
-        self.c_shift = c_shift
-
-        self.w = HyperDense(self.input_dim + 1,
-                            self.hidden_dim)  # +1 for the shift
-        self.scaler = Scaler(self.hidden_dim,
-                             self.scaler_init,
-                             self.scaler_scale)
+        self.c_shift = c_shift  # Would be nice to register buffer but then forward breaks with CudaGraphModule
+        self.w = HyperDense(input_dim + 1, hidden_dim)  # +1 for the shift
+        self.scaler = Scaler(hidden_dim, scaler_init, scaler_scale)
 
     def forward(self, x: torch.tensor) -> torch.tensor:
         x = F.pad(x, (0, 1), value=self.c_shift) # appends c_shift to last_dim
@@ -107,26 +80,14 @@ class HyperLERPBlock(nn.Module):
                  scaler_scale: float, alpha_init: float, alpha_scale: float,
                  expansion: int = 4):
         super().__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.scaler_init = scaler_init
-        self.scaler_scale = scaler_scale
-        self.alpha_init = alpha_init
-        self.alpha_scale = alpha_scale
-        self.expansion = expansion
-
         self.mlp = HyperMLP(
-            input_dim=self.input_dim,
-            output_dim=self.hidden_dim,
-            hidden_dim=self.hidden_dim * self.expansion,
-            scaler_init=self.scaler_init / math.sqrt(self.expansion),
-            scaler_scale=self.scaler_scale / math.sqrt(self.expansion)
+            input_dim=input_dim,
+            output_dim=hidden_dim,
+            hidden_dim=hidden_dim * expansion,
+            scaler_init=scaler_init / math.sqrt(expansion),
+            scaler_scale=scaler_scale / math.sqrt(expansion)
         )
-        self.alpha_scaler = Scaler(
-            self.hidden_dim,
-            init=self.alpha_init,
-            scale=self.alpha_scale,
-        )
+        self.alpha_scaler = Scaler(hidden_dim, alpha_init, alpha_scale)
 
     def forward(self, x: torch.tensor) -> torch.tensor:
         residual = x
@@ -150,23 +111,18 @@ class HyperNormalTanhPolicy(nn.Module):
                  log_std_min: float = -10.0,
                  log_std_max: float = 2.0):
         super().__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.action_dim = action_dim
-        self.scaler_init = scaler_init
-        self.scaler_scale = scaler_scale
-        self.log_std_min = log_std_min
-        self.log_std_max = log_std_max
+        self.register_buffer("log_std_min", torch.tensor(log_std_min))
+        self.register_buffer("log_std_max", torch.tensor(log_std_max))
 
-        self.mean_w1 = HyperDense(self.input_dim, self.hidden_dim)
-        self.mean_scaler = Scaler(self.hidden_dim, self.scaler_init, self.scaler_scale)
-        self.mean_w2 = HyperDense(self.hidden_dim, self.action_dim)
-        self.mean_bias = nn.Parameter(torch.zeros(self.action_dim))
+        self.mean_w1 = HyperDense(input_dim, hidden_dim)
+        self.mean_scaler = Scaler(hidden_dim, scaler_init, scaler_scale)
+        self.mean_w2 = HyperDense(hidden_dim, action_dim)
+        self.mean_bias = nn.Parameter(torch.zeros(action_dim))
 
-        self.std_w1 = HyperDense(self.input_dim, self.hidden_dim)
-        self.std_scaler = Scaler(self.hidden_dim, self.scaler_init, self.scaler_scale)
-        self.std_w2 = HyperDense(self.hidden_dim, self.action_dim)
-        self.std_bias = nn.Parameter(torch.zeros(self.action_dim))
+        self.std_w1 = HyperDense(input_dim, hidden_dim)
+        self.std_scaler = Scaler(hidden_dim, scaler_init, scaler_scale)
+        self.std_w2 = HyperDense(hidden_dim, action_dim)
+        self.std_bias = nn.Parameter(torch.zeros(action_dim))
 
     def forward(self, x: torch.tensor) -> tuple[torch.Tensor, torch.Tensor]:
         mean = self.mean_w1(x)
@@ -195,20 +151,11 @@ class HyperCategoricalValue(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, num_bins: int, min_v: float, max_v: float,
                  scaler_init: float, scaler_scale: float):
         super().__init__()
-        self.hidden_dim = hidden_dim
-        self.num_bins = num_bins
-        self.min_v = min_v
-        self.max_v = max_v
-        self.scaler_init = scaler_init
-        self.scaler_scale = scaler_scale
-
-        self.w1 = HyperDense(input_dim, self.hidden_dim)
-        self.scaler = Scaler(self.hidden_dim, self.scaler_init, self.scaler_scale)
-        self.w2 = HyperDense(self.hidden_dim, self.num_bins)
-        self.bias = nn.Parameter(torch.zeros(self.num_bins))
-        self.register_buffer("bin_values", torch.linspace(
-            start=self.min_v, end=self.max_v, steps=self.num_bins
-        ).reshape(1, -1))
+        self.w1 = HyperDense(input_dim, hidden_dim)
+        self.scaler = Scaler(hidden_dim, scaler_init, scaler_scale)
+        self.w2 = HyperDense(hidden_dim, num_bins)
+        self.bias = nn.Parameter(torch.zeros(num_bins))
+        self.register_buffer("bin_values", torch.linspace(start=min_v, end=max_v, steps=num_bins).reshape(1, -1))
         self.log_softmax = nn.LogSoftmax(dim=-1)
 
     def forward(self, x: torch.tensor) -> torch.tensor:

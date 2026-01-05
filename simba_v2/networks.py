@@ -22,40 +22,30 @@ class SimbaV2Actor(nn.Module):
                  alpha_scale: float,
                  c_shift: float):
         super().__init__()
-        self.num_blocks = num_blocks
-        self.hidden_dim = hidden_dim
-        self.obs_dim = obs_dim
-        self.action_dim = action_dim
-        self.scaler_init = scaler_init
-        self.scaler_scale = scaler_scale
-        self.alpha_init = alpha_init
-        self.alpha_scale = alpha_scale
-        self.c_shift = c_shift
-
         self.embedder = HyperEmbedder(
-            input_dim=self.obs_dim,
-            hidden_dim=self.hidden_dim,
-            scaler_init=self.scaler_init,
-            scaler_scale=self.scaler_scale,
-            c_shift=self.c_shift
+            input_dim=obs_dim,
+            hidden_dim=hidden_dim,
+            scaler_init=scaler_init,
+            scaler_scale=scaler_scale,
+            c_shift=c_shift
         )
         self.encoder = nn.Sequential(
             *[
                 HyperLERPBlock(
-                    input_dim=self.hidden_dim,
-                    hidden_dim=self.hidden_dim,
-                    scaler_init=self.scaler_init,
-                    scaler_scale=self.scaler_scale,
-                    alpha_init=self.alpha_init,
-                    alpha_scale=self.alpha_scale,
+                    input_dim=hidden_dim,
+                    hidden_dim=hidden_dim,
+                    scaler_init=scaler_init,
+                    scaler_scale=scaler_scale,
+                    alpha_init=alpha_init,
+                    alpha_scale=alpha_scale,
                 )
-                for _ in range(self.num_blocks)
+                for _ in range(num_blocks)
             ]
         )
         self.predictor = HyperNormalTanhPolicy(
-            input_dim=self.hidden_dim,
-            hidden_dim=self.hidden_dim,
-            action_dim=self.action_dim,
+            input_dim=hidden_dim,
+            hidden_dim=hidden_dim,
+            action_dim=action_dim,
             scaler_init=1.0,
             scaler_scale=1.0,
         )
@@ -85,47 +75,33 @@ class SimbaV2Critic(nn.Module):
                  min_v: float,
                  max_v: float):
         super().__init__()
-        self.obs_dim = obs_dim
-        self.action_dim = action_dim
-        self.input_dim = self.obs_dim + self.action_dim
-        self.num_blocks = num_blocks
-        self.hidden_dim = hidden_dim
-        self.scaler_init = scaler_init
-        self.scaler_scale = scaler_scale
-        self.alpha_init = alpha_init
-        self.alpha_scale = alpha_scale
-        self.c_shift = c_shift
-        self.num_bins = num_bins
-        self.min_v = min_v
-        self.max_v = max_v
-
         self.embedder = HyperEmbedder(
-            input_dim=self.input_dim,
-            hidden_dim=self.hidden_dim,
-            scaler_init=self.scaler_init,
-            scaler_scale=self.scaler_scale,
-            c_shift=self.c_shift,
+            input_dim=obs_dim + action_dim,
+            hidden_dim=hidden_dim,
+            scaler_init=scaler_init,
+            scaler_scale=scaler_scale,
+            c_shift=c_shift,
         )
         self.encoder = nn.Sequential(
             *[
                 HyperLERPBlock(
-                    input_dim=self.hidden_dim,
-                    hidden_dim=self.hidden_dim,
-                    scaler_init=self.scaler_init,
-                    scaler_scale=self.scaler_scale,
-                    alpha_init=self.alpha_init,
-                    alpha_scale=self.alpha_scale,
+                    input_dim=hidden_dim,
+                    hidden_dim=hidden_dim,
+                    scaler_init=scaler_init,
+                    scaler_scale=scaler_scale,
+                    alpha_init=alpha_init,
+                    alpha_scale=alpha_scale,
                 )
-                for _ in range(self.num_blocks)
+                for _ in range(num_blocks)
             ]
         )
 
         self.predictor = HyperCategoricalValue(
-            input_dim=self.hidden_dim,
-            hidden_dim=self.hidden_dim,
-            num_bins=self.num_bins,
-            min_v=self.min_v,
-            max_v=self.max_v,
+            input_dim=hidden_dim,
+            hidden_dim=hidden_dim,
+            num_bins=num_bins,
+            min_v=min_v,
+            max_v=max_v,
             scaler_init=1.0,
             scaler_scale=1.0,
         )
