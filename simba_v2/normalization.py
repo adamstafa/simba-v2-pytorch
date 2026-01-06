@@ -16,7 +16,7 @@ class RunningMeanStd(nn.Module):
         self.count += batch_size
         self.m2 += (x.square().sum(dim=0) - batch_size * self.m2) / self.count
         self.mean.copy_(self.mean + (x.sum(dim=0) - batch_size * self.mean) / self.count)
-        self.std.copy_(torch.sqrt(self.m2 - self.mean.square() + 1e-8))
+        self.std.copy_(torch.sqrt((self.m2 - self.mean.square()).clamp_min(1e-8)))
 
 
 class ObservationNormalizer(nn.Module):
