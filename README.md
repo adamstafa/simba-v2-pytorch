@@ -1,4 +1,4 @@
-# Simba V2 - PyTorch
+# SimbaV2 - PyTorch
 Optimized PyTorch implementation of the paper [Hyperspherical Normalization for Scalable Deep Reinforcement Learning
 ](https://arxiv.org/pdf/2502.15280).
 
