@@ -44,11 +44,11 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "HalfCheetah-v4"
     """the environment id of the task"""
-    total_timesteps: int = 1000000
+    total_timesteps: int = 1_000_000
     """total timesteps of the experiments"""
     num_envs: int = 1
     """the number of parallel game environments"""
-    buffer_size: int = int(1e6)
+    buffer_size: int = 1_000_000
     """the replay memory buffer size"""
     gamma: float = 0.99
     """the discount factor gamma"""
@@ -56,12 +56,16 @@ class Args:
     """target smoothing coefficient (default: 0.005)"""
     batch_size: int = 256
     """the batch size of sample from the reply memory"""
-    learning_starts: int = 5e3
+    learning_starts: int = 5000
     """timestep to start learning"""
-    policy_lr: float = 1e-4
-    """the learning rate of the policy network optimizer"""
-    q_lr: float = 1e-4
-    """the learning rate of the Q network network optimizer"""
+    policy_lr_init: float = 1e-4
+    """the initial learning rate of the policy network optimizer"""
+    policy_lr_final: float = 5e-5
+    """the final learning rate of the policy network optimizer"""
+    q_lr_init: float = 1e-4
+    """the initial learning rate of the Q network network optimizer"""
+    q_lr_final: float = 5e-5
+    """the final learning rate of the Q network network optimizer"""
     alpha: float = 0.2
     """Entropy regularization coefficient."""
     autotune: bool = True
@@ -241,8 +245,11 @@ if __name__ == "__main__":
     qf2_target = SoftQNetwork(envs, n_act=n_act, n_obs=n_obs).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
-    q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr, capturable=args.cudagraphs and not args.compile)
-    actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr, capturable=args.cudagraphs and not args.compile)
+
+    q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr_init, capturable=args.cudagraphs and not args.compile)
+    actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr_init, capturable=args.cudagraphs and not args.compile)
+    q_scheduler = optim.lr_scheduler.LinearLR(q_optimizer, start_factor=1.0, end_factor=args.q_lr_final/args.q_lr_init, total_iters=args.total_timesteps)
+    actor_scheduler = optim.lr_scheduler.LinearLR(actor_optimizer, start_factor=1.0, end_factor=args.policy_lr_final/args.policy_lr_init, total_iters=args.total_timesteps)
 
 
     # TODO: we're adding the entropy bonus, episodic return doesn't necessarily approximate the Q-values
@@ -255,7 +262,7 @@ if __name__ == "__main__":
         target_entropy = -torch.prod(torch.Tensor(envs.single_action_space.shape).to(device)).item()
         log_alpha = torch.tensor(math.log(args.alpha), requires_grad=True, device=device)  # Use args.alpha as initial value
         alpha = log_alpha.detach().exp()
-        a_optimizer = optim.Adam([log_alpha], lr=args.q_lr, capturable=args.cudagraphs and not args.compile)
+        a_optimizer = optim.Adam([log_alpha], lr=args.q_lr_init, capturable=args.cudagraphs and not args.compile)
     else:
         alpha = torch.as_tensor(args.alpha, device=device)
     normalized_alpha = reward_normalizer(alpha)  # alpha needs to be scaled the same way as rewards
@@ -432,6 +439,8 @@ if __name__ == "__main__":
             out = update_qnets(data)
             out.update(update_policy(data))
             update_params()
+            actor_scheduler.step()
+            q_scheduler.step()
 
             if global_step % 100 == 0 and start_time is not None:
                 speed = (global_step - measure_burnin) / (time.time() - start_time)
@@ -445,6 +454,8 @@ if __name__ == "__main__":
                         "monitoring/q_mean": out["qvals"].mean(),
                         "monitoring/q_min": out["qvals"].min(),
                         "monitoring/q_max": out["qvals"].max(),
+                        "monitoring/lr_actor": actor_optimizer.param_groups[0]['lr'],
+                        "monitoring/lr_q": q_optimizer.param_groups[0]['lr'],
                         "episode_return": torch.tensor(avg_returns).mean(),
                         "speed": speed,
                         "actor_entropy": out["actor_entropy"],
