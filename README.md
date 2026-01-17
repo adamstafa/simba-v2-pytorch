@@ -11,5 +11,4 @@ The architecture is inspired by the paper authors' [JAX implmenetation](https://
 - Easy to modify 
 
 ## Differences to the original JAX version
-- The rewards are normalized by the maximum discounted episodic return (same performance as the original version but better interpretable)
-- LR annealing has not been implemented yet.
+- The rewards are normalized by the maximum discounted episodic return (same performance as the original version but more interpretable)
