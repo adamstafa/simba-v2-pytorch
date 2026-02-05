@@ -2,7 +2,7 @@
 Optimized PyTorch implementation of the paper [Hyperspherical Normalization for Scalable Deep Reinforcement Learning
 ](https://arxiv.org/pdf/2502.15280).
 
-The architecture is inspired by the paper authors' [JAX implmenetation](https://github.com/DAVIAN-Robotics/SimbaV2) and the underlying SAC implementation is adapted from [LeanRL](https://github.com/meta-pytorch/LeanRL/blob/main/leanrl/sac_continuous_action_torchcompile.py).
+The architecture is inspired by the paper authors' [JAX implementation](https://github.com/DAVIAN-Robotics/SimbaV2) and the underlying SAC implementation is adapted from [LeanRL](https://github.com/meta-pytorch/LeanRL/blob/main/leanrl/sac_continuous_action_torchcompile.py).
 
 ## Features
 - Faithful implementation of the paper
