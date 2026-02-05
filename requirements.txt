@@ -1,0 +1,8 @@
+gymnasium[mujoco]<1.0.0
+moviepy
+numpy
+tensordict==0.10.0
+torchrl==0.10.1
+tqdm
+tyro
+wandb
